@@ -8,7 +8,7 @@ fn main() {
     use std::io::prelude::*;
     use std::io::BufReader;
     use std::fs::File;
-    let file = File::open("b").unwrap();
+    let file = File::open("test.kl").unwrap();
     let mut content = String::new();
     BufReader::new(file).read_to_string(&mut content).unwrap();
 

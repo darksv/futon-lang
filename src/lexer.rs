@@ -91,6 +91,7 @@ impl<'a> Token<'a> {
             TokenValue::Identifier => TokenType::Identifier,
             TokenValue::Keyword(kw) => TokenType::Keyword(kw),
             TokenValue::IntegralNumber(_) => TokenType::IntegralNumber,
+            TokenValue::FloatingNumber(_) => TokenType::FloatingNumber,
             _ => unreachable!(),
         }
     }
@@ -107,6 +108,14 @@ impl<'a> Token<'a> {
     pub fn get_integer(&self) -> Option<i32> {
         match self.value {
             TokenValue::IntegralNumber(val) => Some(val),
+            _ => None
+        }
+    }
+
+    /// Returns the float number when token is a float literal
+    pub fn get_float(&self) -> Option<f32> {
+        match self.value {
+            TokenValue::FloatingNumber(val) => Some(val),
             _ => None
         }
     }
@@ -315,25 +324,50 @@ impl<'a> Lexer<'a> {
     fn match_number(&mut self) -> Result<Option<Token<'a>>, LexerError> {
         let (line, column) = (self.line, self.column);
         let idx_start = self.position;
-        let mut number = 0i32;
+        let mut is_floating = false;
+        self.advance_while_digits();
+        if let Some('.') = self.peek() {
+            self.advance().unwrap();
+            self.advance_while_digits();
+            is_floating = true;
+        }
+        let has_exponent = match self.peek() {
+            Some('e') | Some('E') => {
+                self.advance().unwrap();
+                true
+            }
+            _ => false
+        };
+        if has_exponent {
+            match self.peek() {
+                Some('+') | Some('-') => {
+                    self.advance().unwrap();
+                }
+                _ => (),
+            }
+            self.advance_while_digits();
+            is_floating = true;
+        };
+
+        let lexeme = self.take_slice_from(idx_start);
+        let value = if is_floating {
+            let parsed = lexeme.as_slice().parse::<f32>().unwrap();
+            TokenValue::FloatingNumber(parsed)
+        } else {
+            let parsed = lexeme.as_slice().parse::<i32>().unwrap();
+            TokenValue::IntegralNumber(parsed)
+        };
+
+        Ok(Some(Token { value, lexeme, line, column }))
+    }
+
+    fn advance_while_digits(&mut self) {
         loop {
             match self.peek() {
-                Some(digit @ '0' ... '9') => {
-                    number = number * 10 + (digit as u8 - b'0') as i32;
-                    self.advance().unwrap();
-                }
-                Some('_') => {
-                    self.advance().unwrap();
-                }
+                Some('0' ... '9') | Some('_') => self.advance().unwrap(),
                 _ => break,
-            }
+            };
         }
-        Ok(Some(Token {
-            value: TokenValue::IntegralNumber(number),
-            lexeme: self.take_slice_from(idx_start),
-            line,
-            column,
-        }))
     }
 
     /// Returns a keyword when a given text can be one

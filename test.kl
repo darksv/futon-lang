@@ -1,0 +1,195 @@
+func main(koszi, jest, spoko) {
+    for item in generator {
+        if item {
+            for iks in item {
+            for item in generator {
+                    if item {
+                        for iks in item {
+                            yield item
+                        }
+                    }
+                    for a in item {
+                        yield 123
+                        return 1234
+                    }
+                }
+                func main(koszi, jest, spoko) {
+                    for item in generator {
+                        if item {
+                            for iks in item {
+                            for item in generator {
+                                    if item {
+                                        for iks in item {
+                                            yield item
+                                        }
+                                    }
+                                    for a in item {
+                                        yield 123
+                                        return 1234
+                                    }
+                                }
+                                for item in generator {
+                                        if item {
+                                            for iks in item {
+                                               for item in generator {
+                                                       if item {
+                                                           for iks in item {
+                                                               yield item
+                                                           }
+                                                       }
+                                                       for a in item {
+                                                           yield 123
+                                                           return 1234
+                                                       }
+                                                   }
+                                            }
+                                        }
+                                        for a in item {
+                                            yield 123
+                                            return 1234
+                                        }
+                                    }
+                                    for item in generator {
+                                            if item {
+                                                for iks in item {
+                                                    for item in generator {
+                                                            if item {
+                                                                for iks in item {
+                                                                    yield item
+                                                                }
+                                                            }
+                                                            for a in item {
+                                                                yield 21.37
+                                                                return 1234
+                                                            }
+                                                        }
+                                                }
+                                            }
+                                            for a in item {
+                                                yield 123
+                                                return 1234
+                                            }
+                                        }
+                                        for item in generator {
+                                                if item {
+                                                    for iks in item {
+                                                        for item in generator {
+                                                                if item {
+                                                                    for iks in item {
+                                                                        for item in generator {
+                                                                                if item {
+                                                                                    for iks in item {
+                                                                                        yield item
+                                                                                    }
+                                                                                }
+                                                                                for a in item {
+                                                                                    yield 123
+                                                                                    return 1234
+                                                                                }
+                                                                            }
+                                                                    }
+                                                                }
+                                                                for a in item {
+                                                                    yield 123
+                                                                    return 1234
+                                                                }
+                                                            }
+                                                    }
+                                                }
+                                                for a in item {
+                                                    yield 123
+                                                    return 1234
+                                                }
+                                            }
+                                yield item
+                            }
+                        }
+                        for a in item {
+                            yield 123
+                            return 1234
+                        }
+                    }
+                }
+                for item in generator {
+                        if item {
+                            for iks in item {
+                               for item in generator {
+                                       if item {
+                                           for iks in item {
+                                               yield item
+                                           }
+                                       }
+                                       for a in item {
+                                           yield 123
+                                           return 1234
+                                       }
+                                   }
+                            }
+                        }
+                        for a in item {
+                            yield 123
+                            return 1234
+                        }
+                    }
+                    for item in generator {
+                            if item {
+                                for iks in item {
+                                    for item in generator {
+                                            if item {
+                                                for iks in item {
+                                                    yield item
+                                                }
+                                            }
+                                            for a in item {
+                                                yield 123
+                                                return 1234
+                                            }
+                                        }
+                                }
+                            }
+                            for a in item {
+                                yield 123
+                                return 1234
+                            }
+                        }
+                        for item in generator {
+                                if item {
+                                    for iks in item {
+                                        for item in generator {
+                                                if item {
+                                                    for iks in item {
+                                                        for item in generator {
+                                                                if item {
+                                                                    for iks in item {
+                                                                        yield item
+                                                                    }
+                                                                }
+                                                                for a in item {
+                                                                    yield 123
+                                                                    return 1234
+                                                                }
+                                                            }
+                                                    }
+                                                }
+                                                for a in item {
+                                                    yield 123
+                                                    return 1234
+                                                }
+                                            }
+                                    }
+                                }
+                                for a in item {
+                                    yield 123
+                                    return 1234
+                                }
+                            }
+                yield item
+            }
+        }
+        for a in item {
+            yield 123
+            return 1.e10
+            return 0.123e-1
+        }
+    }
+}

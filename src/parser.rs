@@ -18,6 +18,7 @@ pub struct Argument { name: String }
 pub enum Expression {
     Identifier(String),
     IntegralConstant(i32),
+    FloatingConstant(f32),
 }
 
 #[derive(Debug)]
@@ -107,6 +108,10 @@ impl<'a> Parser<'a> {
             Some((TokenType::IntegralNumber, token)) => {
                 self.advance().unwrap();
                 Expression::IntegralConstant(token.get_integer().unwrap())
+            }
+            Some((TokenType::FloatingNumber, token)) => {
+                self.advance().unwrap();
+                Expression::FloatingConstant(token.get_float().unwrap())
             }
             Some((TokenType::Identifier, token)) => {
                 self.advance().unwrap();
