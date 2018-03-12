@@ -1,0 +1,6 @@
+[package]
+name = "untitled"
+version = "0.1.0"
+authors = ["darksv <darek969-12@o2.pl>"]
+
+[dependencies]
