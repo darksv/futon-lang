@@ -237,7 +237,7 @@ pub enum LexerError {}
 
 impl<'a> Lexer<'a> {
     /// Returns next token from the source
-    pub fn next(&mut self) -> Result<Option<Token<'a>>, LexerError> {
+    pub fn next(&mut self) -> Result<Token<'a>, LexerError> {
         self.skip_space();
         let token = match self.peek() {
             Some(ch) if self.can_start_identifier(ch) => self.match_keyword_or_identifier()?,
@@ -281,7 +281,7 @@ impl<'a> Lexer<'a> {
     }
 
     /// Returns current token when it is a keyword or an identifier
-    fn match_keyword_or_identifier(&mut self) -> Result<Option<Token<'a>>, LexerError> {
+    fn match_keyword_or_identifier(&mut self) -> Result<Token<'a>, LexerError> {
         let (line, column) = (self.line, self.column);
         let idx_start = self.position;
         while let Some(ch) = self.peek() {
@@ -296,11 +296,11 @@ impl<'a> Lexer<'a> {
             Some(keyword) => TokenValue::Keyword(keyword),
             None => TokenValue::Identifier,
         };
-        Ok(Some(Token { value: kind, lexeme, line, column }))
+        Ok(Token { value: kind, lexeme, line, column })
     }
 
     /// Returns current token when it is a string literal
-    fn match_string(&mut self) -> Result<Option<Token<'a>>, LexerError> {
+    fn match_string(&mut self) -> Result<Token<'a>, LexerError> {
         let (line, column) = (self.line, self.column);
         let idx_start = self.position;
         // '"'
@@ -318,12 +318,12 @@ impl<'a> Lexer<'a> {
                 }
             }
         }
-        Ok(Some(Token {
+        Ok(Token {
             value: TokenValue::String(string),
             lexeme: self.take_slice_from(idx_start),
             line,
             column,
-        }))
+        })
     }
 
     /// Returns slice of the source starting from a given index and ending at current index
@@ -333,33 +333,33 @@ impl<'a> Lexer<'a> {
     }
 
     /// Returns current token when it is a single character
-    fn match_single(&mut self, ch: char) -> Result<Option<Token<'a>>, LexerError> {
+    fn match_single(&mut self, ch: char) -> Result<Token<'a>, LexerError> {
         let (line, column) = (self.line, self.column);
         let lexeme = {
             let start_idx = self.position;
             self.advance().unwrap();
             self.take_slice_from(start_idx)
         };
-        Ok(Some(Token {
+        Ok(Token {
             value: TokenValue::SingleChar(ch),
             lexeme,
             line,
             column,
-        }))
+        })
     }
 
-    fn match_end_of_source(&mut self) -> Result<Option<Token<'a>>, LexerError> {
+    fn match_end_of_source(&mut self) -> Result<Token<'a>, LexerError> {
         let idx_start = self.position;
-        Ok(Some(Token {
+        Ok(Token {
             value: TokenValue::None,
             lexeme: self.take_slice_from(idx_start),
             line: self.line,
             column: self.column,
-        }))
+        })
     }
 
     /// Returns current token when it is a number
-    fn match_number(&mut self) -> Result<Option<Token<'a>>, LexerError> {
+    fn match_number(&mut self) -> Result<Token<'a>, LexerError> {
         let (line, column) = (self.line, self.column);
         let idx_start = self.position;
         let mut is_floating = false;
@@ -396,7 +396,7 @@ impl<'a> Lexer<'a> {
             TokenValue::IntegralNumber(parsed)
         };
 
-        Ok(Some(Token { value, lexeme, line, column }))
+        Ok(Token { value, lexeme, line, column })
     }
 
     fn advance_while_digits(&mut self) {

@@ -69,9 +69,11 @@ impl<'a> Parser<'a> {
 
     pub fn parse(&mut self) -> ParseResult<Vec<Item>> {
         let mut items = vec![];
-        while let Some(token) = self.peek() {
+        loop {
+            let token = self.peek();
             let item = match token.get_type() {
                 TokenType::Keyword(Keyword::Func) => self.parse_func(),
+                TokenType::EndOfSource => break,
                 token_type => unimplemented!("{:?}", token_type),
             };
             items.push(item?);
@@ -101,15 +103,16 @@ impl<'a> Parser<'a> {
 
     fn parse_stmts(&mut self) -> ParseResult<Vec<Item>> {
         let mut items = vec![];
-        while let Some(t) = self.peek() {
-            let item = match t.get_type() {
+        loop {
+            let token = self.peek();
+            let item = match token.get_type() {
                 TokenType::Keyword(Keyword::For) => self.parse_for(),
                 TokenType::Keyword(Keyword::Func) => self.parse_func(),
                 TokenType::Keyword(Keyword::If) => self.parse_if(),
                 TokenType::Keyword(Keyword::Yield) => self.parse_yield(),
                 TokenType::Keyword(Keyword::Return) => self.parse_return(),
                 TokenType::Keyword(Keyword::Break) => {
-                    self.advance().unwrap();
+                    self.advance();
                     Ok(Item::Break)
                 }
                 _ => break,
@@ -120,17 +123,18 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_expr(&mut self) -> ParseResult<Expression> {
-        let expr = match self.peek().map(|token| (token.get_type(), token)) {
-            Some((TokenType::IntegralNumber, token)) => {
-                self.advance().unwrap();
+        let token = self.peek();
+        let expr = match (token.get_type(), token) {
+            (TokenType::IntegralNumber, token) => {
+                self.advance();
                 Expression::IntegralConstant(token.get_integer().unwrap())
             }
-            Some((TokenType::FloatingNumber, token)) => {
-                self.advance().unwrap();
+            (TokenType::FloatingNumber, token) => {
+                self.advance();
                 Expression::FloatingConstant(token.get_float().unwrap())
             }
-            Some((TokenType::Identifier, token)) => {
-                self.advance().unwrap();
+            (TokenType::Identifier, token) => {
+                self.advance();
                 Expression::Identifier(token.as_string())
             }
             _ => unimplemented!(),
@@ -186,7 +190,7 @@ impl<'a> Parser<'a> {
     }
 
     fn expected(&mut self, token_type: TokenType) -> ParseError {
-        let token = self.peek().unwrap();
+        let token = self.peek();
         ParseError::UnexpectedToken(
             TokenType::EndOfSource,
             token.get_line(),
@@ -196,8 +200,8 @@ impl<'a> Parser<'a> {
     }
 
     fn match_keyword(&mut self, keyword: Keyword) -> Option<Token<'a>> {
-        match self.peek()?.get_type() {
-            TokenType::Keyword(kw) if kw == keyword => self.advance(),
+        match self.peek().get_type() {
+            TokenType::Keyword(kw) if kw == keyword => Some(self.advance()),
             _ => None,
         }
     }
@@ -210,8 +214,8 @@ impl<'a> Parser<'a> {
     }
 
     fn match_identifier(&mut self) -> Option<Token<'a>> {
-        match self.peek()?.get_type() {
-            TokenType::Identifier => self.advance(),
+        match self.peek().get_type() {
+            TokenType::Identifier => Some(self.advance()),
             _ => None,
         }
     }
@@ -226,29 +230,29 @@ impl<'a> Parser<'a> {
 
     /// Consumes and returns next token only if it is a char given by argument
     fn match_symbol(&mut self, symbol: char) -> Option<Token<'a>> {
-        if self.peek()?.get_char() == Some(symbol) {
-            self.advance()
+        if self.peek().get_char() == Some(symbol) {
+            Some(self.advance())
         } else {
             None
         }
     }
 
     /// Returns next token without consuming it
-    fn peek(&mut self) -> Option<Token<'a>> {
+    fn peek(&mut self) -> Token<'a> {
         self.ensure_peeked();
-        self.peeked.clone()
+        self.peeked.clone().unwrap()
     }
 
     /// Returns next token and consumes it
-    fn advance(&mut self) -> Option<Token<'a>> {
+    fn advance(&mut self) -> Token<'a> {
         self.ensure_peeked();
-        self.peeked.take()
+        self.peeked.take().unwrap()
     }
 
     /// Ensures that next token (if any) is taken from lexer
     fn ensure_peeked(&mut self) {
         if self.peeked.is_none() {
-            self.peeked = self.lex.next().unwrap();
+            self.peeked = self.lex.next().ok();
         }
     }
 }
