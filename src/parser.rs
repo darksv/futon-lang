@@ -43,6 +43,8 @@ pub enum Item {
     Return(Box<Expression>),
 }
 
+type ParseResult<T> = Result<T, ParseError>;
+
 impl<'a> Parser<'a> {
     pub fn new(lex: &'a mut Lexer<'a>) -> Parser<'a> {
         Parser {
@@ -51,7 +53,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse(&mut self) -> Result<Vec<Item>, ParseError> {
+    pub fn parse(&mut self) -> ParseResult<Vec<Item>> {
         let mut items = vec![];
         while let Some(token) = self.peek() {
             let item = match token.get_type() {
@@ -63,7 +65,7 @@ impl<'a> Parser<'a> {
         Ok(items)
     }
 
-    fn parse_func(&mut self) -> Result<Item, ParseError> {
+    fn parse_func(&mut self) -> ParseResult<Item> {
         self.expect_keyword(Keyword::Func)?;
         let identifier = self.expect_identifier()?.as_string();
         self.expect_symbol('(')?;
@@ -83,7 +85,7 @@ impl<'a> Parser<'a> {
         Ok(Item::Function { name: identifier, args, body })
     }
 
-    fn parse_stmts(&mut self) -> Result<Vec<Item>, ParseError> {
+    fn parse_stmts(&mut self) -> ParseResult<Vec<Item>> {
         let mut items = vec![];
         while let Some(t) = self.peek() {
             let item = match t.get_type() {
@@ -103,7 +105,7 @@ impl<'a> Parser<'a> {
         Ok(items)
     }
 
-    fn parse_expr(&mut self) -> Result<Expression, ParseError> {
+    fn parse_expr(&mut self) -> ParseResult<Expression> {
         let expr = match self.peek().map(|token| (token.get_type(), token)) {
             Some((TokenType::IntegralNumber, token)) => {
                 self.advance().unwrap();
@@ -122,7 +124,7 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    fn parse_for(&mut self) -> Result<Item, ParseError> {
+    fn parse_for(&mut self) -> ParseResult<Item> {
         self.expect_keyword(Keyword::For)?;
         let identifier = self.expect_identifier()?.as_string();
         self.expect_keyword(Keyword::In)?;
@@ -133,7 +135,7 @@ impl<'a> Parser<'a> {
         Ok(Item::ForIn { name: identifier.to_owned(), expr, body: items })
     }
 
-    fn parse_if(&mut self) -> Result<Item, ParseError> {
+    fn parse_if(&mut self) -> ParseResult<Item> {
         self.expect_keyword(Keyword::If)?;
         let condition = self.parse_expr()?;
         self.expect_symbol('{')?;
@@ -150,29 +152,29 @@ impl<'a> Parser<'a> {
         Ok(Item::If { condition, arm_true, arm_false })
     }
 
-    fn parse_yield(&mut self) -> Result<Item, ParseError> {
+    fn parse_yield(&mut self) -> ParseResult<Item> {
         self.expect_keyword(Keyword::Yield)?;
         let value = self.parse_expr()?;
         Ok(Item::Yield(Box::new(value)))
     }
 
-    fn parse_return(&mut self) -> Result<Item, ParseError> {
+    fn parse_return(&mut self) -> ParseResult<Item> {
         self.expect_keyword(Keyword::Return)?;
         let value = self.parse_expr()?;
         Ok(Item::Return(Box::new(value)))
     }
 
-    fn expect_keyword(&mut self, keyword: Keyword) -> Result<Token<'a>, ParseError> {
+    fn expect_keyword(&mut self, keyword: Keyword) -> ParseResult<Token<'a>> {
         match self.match_keyword(keyword) {
             Some(token) => Ok(token),
-            None => Err(self.expected(TokenType::Keyword(keyword)))
+            None => Err(self.expected(TokenType::Keyword(keyword))),
         }
     }
 
-    fn expected(&mut self, ttype: TokenType) -> ParseError {
+    fn expected(&mut self, token_type: TokenType) -> ParseError {
         match self.peek() {
-            Some(ref token) => ParseError::ExpectedToken(ttype, token.get_line(), token.get_column()),
-            None => panic!()
+            Some(ref token) => ParseError::ExpectedToken(token_type, token.get_line(), token.get_column()),
+            None => panic!(),
         }
     }
 
@@ -183,7 +185,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn expect_identifier(&mut self) -> Result<Token<'a>, ParseError> {
+    fn expect_identifier(&mut self) -> ParseResult<Token<'a>> {
         match self.match_identifier() {
             Some(token) => Ok(token),
             None => Err(self.expected(TokenType::Identifier))
@@ -198,7 +200,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Consumes and returns next token, otherwise returns an error
-    fn expect_symbol(&mut self, symbol: char) -> Result<Token<'a>, ParseError> {
+    fn expect_symbol(&mut self, symbol: char) -> ParseResult<Token<'a>> {
         match self.match_symbol(symbol) {
             Some(token) => Ok(token),
             None => Err(self.expected(TokenType::SingleChar))
