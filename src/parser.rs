@@ -1,3 +1,4 @@
+use std::fmt;
 use super::{Lexer, Token, TokenType, Keyword};
 
 
@@ -6,9 +7,22 @@ pub struct Parser<'a> {
     peeked: Option<Token<'a>>,
 }
 
-#[derive(Debug)]
 pub enum ParseError {
-    ExpectedToken(TokenType, usize, usize)
+    UnexpectedToken(TokenType, usize, usize, Option<TokenType>),
+}
+
+impl fmt::Debug for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            &ParseError::UnexpectedToken(actual, line, column, None) => {
+                write!(f, "Unexpected {:?} at {}:{}", actual, line, column)?
+            }
+            &ParseError::UnexpectedToken(actual, line, column, Some(expected)) => {
+                write!(f, "Unexpected {:?} at {}:{}, expected {:?}", actual, line, column, expected)?
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -58,7 +72,7 @@ impl<'a> Parser<'a> {
         while let Some(token) = self.peek() {
             let item = match token.get_type() {
                 TokenType::Keyword(Keyword::Func) => self.parse_func(),
-                _ => unimplemented!()
+                token_type => unimplemented!("{:?}", token_type),
             };
             items.push(item?);
         }
@@ -172,10 +186,13 @@ impl<'a> Parser<'a> {
     }
 
     fn expected(&mut self, token_type: TokenType) -> ParseError {
-        match self.peek() {
-            Some(ref token) => ParseError::ExpectedToken(token_type, token.get_line(), token.get_column()),
-            None => panic!(),
-        }
+        let token = self.peek().unwrap();
+        ParseError::UnexpectedToken(
+            TokenType::EndOfSource,
+            token.get_line(),
+            token.get_column(),
+            Some(token_type),
+        )
     }
 
     fn match_keyword(&mut self, keyword: Keyword) -> Option<Token<'a>> {
@@ -203,7 +220,7 @@ impl<'a> Parser<'a> {
     fn expect_symbol(&mut self, symbol: char) -> ParseResult<Token<'a>> {
         match self.match_symbol(symbol) {
             Some(token) => Ok(token),
-            None => Err(self.expected(TokenType::SingleChar))
+            None => Err(self.expected(TokenType::SingleChar(symbol)))
         }
     }
 

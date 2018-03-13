@@ -14,5 +14,8 @@ fn main() {
 
     let mut lex = Lexer::from_source(&content);
     let mut parser = Parser::new(&mut lex);
-    println!("{:#?}", parser.parse().unwrap());
+    match parser.parse() {
+        Ok(k) => println!("{:#?}", k),
+        Err(e) => println!("{:?}", e),
+    }
 }

@@ -4,8 +4,18 @@ use std::fmt;
 /// Macro used to generate Keyword enum based on collection of string slices
 macro_rules! keywords {
     ($($val:expr => $name:ident),*) => {
-        #[derive(Debug, Copy, Clone, PartialEq)]
+        #[derive(Copy, Clone, PartialEq)]
         pub enum Keyword { $($name,)* }
+
+        impl fmt::Debug for Keyword {
+            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                match self {
+                    $(&Keyword::$name => write!(f, $val)?),*
+                }
+                Ok(())
+            }
+        }
+
         const KEYWORDS: [(&'static str, Keyword); count_idents!($($name),*)] = [$(($val, Keyword::$name)),*];
     }
 }
@@ -35,6 +45,7 @@ keywords! {
 /// Storage for values stored in a single token
 #[derive(Clone, Debug)]
 pub enum TokenValue {
+    None,
     SingleChar(char),
     Identifier,
     IntegralNumber(i32),
@@ -44,14 +55,30 @@ pub enum TokenValue {
 }
 
 /// Type of the token
-#[derive(Copy, Clone, PartialEq, Debug)]
+#[derive(Copy, Clone, PartialEq)]
 pub enum TokenType {
-    SingleChar,
+    SingleChar(char),
     Identifier,
     IntegralNumber,
     FloatingNumber,
     String,
     Keyword(Keyword),
+    EndOfSource,
+}
+
+impl fmt::Debug for TokenType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            TokenType::SingleChar(ch) => write!(f, "`{}`", ch)?,
+            TokenType::Identifier => write!(f, "identifier")?,
+            TokenType::IntegralNumber => write!(f, "integral literal")?,
+            TokenType::FloatingNumber => write!(f, "floating literal")?,
+            TokenType::String => write!(f, "string")?,
+            TokenType::Keyword(keyword) => write!(f, "`{:?} keyword`", keyword)?,
+            TokenType::EndOfSource => write!(f, "end of source")?,
+        }
+        Ok(())
+    }
 }
 
 /// Lexical unit produced by lexical analysis of source code
@@ -87,12 +114,13 @@ impl<'a> Token<'a> {
     /// Returns type of the token
     pub fn get_type(&self) -> TokenType {
         match self.value {
-            TokenValue::SingleChar(_) => TokenType::SingleChar,
+            TokenValue::SingleChar(ch) => TokenType::SingleChar(ch),
             TokenValue::Identifier => TokenType::Identifier,
             TokenValue::Keyword(kw) => TokenType::Keyword(kw),
             TokenValue::IntegralNumber(_) => TokenType::IntegralNumber,
             TokenValue::FloatingNumber(_) => TokenType::FloatingNumber,
-            _ => unreachable!(),
+            TokenValue::None => TokenType::EndOfSource,
+            _ => unimplemented!(),
         }
     }
 
@@ -216,7 +244,7 @@ impl<'a> Lexer<'a> {
             Some(ch) if ch.is_digit(10) => self.match_number()?,
             Some('"') => self.match_string()?,
             Some(ch) => self.match_single(ch)?,
-            None => None,
+            None => self.match_end_of_source()?,
         };
         Ok(token)
     }
@@ -317,6 +345,16 @@ impl<'a> Lexer<'a> {
             lexeme,
             line,
             column,
+        }))
+    }
+
+    fn match_end_of_source(&mut self) -> Result<Option<Token<'a>>, LexerError> {
+        let idx_start = self.position;
+        Ok(Some(Token {
+            value: TokenValue::None,
+            lexeme: self.take_slice_from(idx_start),
+            line: self.line,
+            column: self.column,
         }))
     }
 
