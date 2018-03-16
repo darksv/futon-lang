@@ -232,7 +232,9 @@ impl<'a> fmt::Debug for Lexeme<'a> {
 
 /// Error returned by lexer
 #[derive(Debug)]
-pub enum LexerError {}
+pub enum LexerError {
+    UnexpectedEndOfSource(usize, usize),
+}
 
 pub type LexerResult<T> = Result<T, LexerError>;
 
@@ -307,16 +309,19 @@ impl<'a> Lexer<'a> {
         // '"'
         self.advance().unwrap();
         let mut string = String::new();
-        while let Some(ch) = self.peek() {
-            match ch {
-                '"' => {
-                    self.advance().unwrap();
-                    break;
-                }
-                ch => {
-                    string.push(ch);
-                    self.advance().unwrap();
-                }
+        loop {
+            match self.peek() {
+                Some(ch) => match ch {
+                    '"' => {
+                        self.advance().unwrap();
+                        break;
+                    }
+                    ch => {
+                        string.push(ch);
+                        self.advance().unwrap();
+                    }
+                },
+                None => return Err(LexerError::UnexpectedEndOfSource(self.line, self.column)),
             }
         }
         Ok(Token {
