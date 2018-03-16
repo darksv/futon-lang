@@ -234,10 +234,11 @@ impl<'a> fmt::Debug for Lexeme<'a> {
 #[derive(Debug)]
 pub enum LexerError {}
 
+pub type LexerResult<T> = Result<T, LexerError>;
 
 impl<'a> Lexer<'a> {
     /// Returns next token from the source
-    pub fn next(&mut self) -> Result<Token<'a>, LexerError> {
+    pub fn next(&mut self) -> LexerResult<Token<'a>> {
         self.skip_space();
         let token = match self.peek() {
             Some(ch) if self.can_start_identifier(ch) => self.match_keyword_or_identifier()?,
@@ -281,7 +282,7 @@ impl<'a> Lexer<'a> {
     }
 
     /// Returns current token when it is a keyword or an identifier
-    fn match_keyword_or_identifier(&mut self) -> Result<Token<'a>, LexerError> {
+    fn match_keyword_or_identifier(&mut self) -> LexerResult<Token<'a>> {
         let (line, column) = (self.line, self.column);
         let idx_start = self.position;
         while let Some(ch) = self.peek() {
@@ -300,7 +301,7 @@ impl<'a> Lexer<'a> {
     }
 
     /// Returns current token when it is a string literal
-    fn match_string(&mut self) -> Result<Token<'a>, LexerError> {
+    fn match_string(&mut self) -> LexerResult<Token<'a>> {
         let (line, column) = (self.line, self.column);
         let idx_start = self.position;
         // '"'
@@ -333,7 +334,7 @@ impl<'a> Lexer<'a> {
     }
 
     /// Returns current token when it is a single character
-    fn match_single(&mut self, ch: char) -> Result<Token<'a>, LexerError> {
+    fn match_single(&mut self, ch: char) -> LexerResult<Token<'a>> {
         let (line, column) = (self.line, self.column);
         let lexeme = {
             let start_idx = self.position;
@@ -348,7 +349,7 @@ impl<'a> Lexer<'a> {
         })
     }
 
-    fn match_end_of_source(&mut self) -> Result<Token<'a>, LexerError> {
+    fn match_end_of_source(&mut self) -> LexerResult<Token<'a>> {
         let idx_start = self.position;
         Ok(Token {
             value: TokenValue::None,
@@ -359,7 +360,7 @@ impl<'a> Lexer<'a> {
     }
 
     /// Returns current token when it is a number
-    fn match_number(&mut self) -> Result<Token<'a>, LexerError> {
+    fn match_number(&mut self) -> LexerResult<Token<'a>> {
         let (line, column) = (self.line, self.column);
         let idx_start = self.position;
         let mut is_floating = false;
