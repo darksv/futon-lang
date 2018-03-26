@@ -91,7 +91,7 @@ impl fmt::Debug for TokenType {
 }
 
 /// Lexical unit produced by lexical analysis of source code
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct Token<'a> {
     /// Value stored in the token
     value: TokenValue,
@@ -240,6 +240,12 @@ impl<'a> Lexeme<'a> {
     #[allow(dead_code)]
     pub fn adjoins_with(&self, other: &Lexeme<'a>) -> bool {
         self.raw.as_ptr() == other.raw.as_ptr() && other.start - self.start == self.length
+    }
+}
+
+impl<'a> PartialEq for Lexeme<'a> {
+    fn eq(&self, other: &Lexeme<'a>) -> bool {
+        self.as_slice() == other.as_slice()
     }
 }
 
@@ -489,5 +495,86 @@ impl<'a> Lexer<'a> {
             self.position = idx;
         }
         Some(ch)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Lexer, LexerError, Token, Lexeme, TokenType, TokenValue, Keyword, Special};
+
+    macro_rules! assert_token {
+        ($actual:expr, $expected:expr) => {
+            assert_eq!($actual.map(|token| token.get_type()), Ok($expected));
+        }
+    }
+
+    #[test]
+    fn empty() {
+        let mut lex = Lexer::from_source("");
+        assert_token!(lex.next(), TokenType::EndOfSource);
+    }
+
+    #[test]
+    fn only_whitespace() {
+        let mut lex = Lexer::from_source("  \t\n   \n");
+        assert_token!(lex.next(), TokenType::EndOfSource);
+    }
+
+    #[test]
+    fn single_special_char() {
+        let mut lex = Lexer::from_source("(");
+        assert_token!(lex.next(), TokenType::Special(Special::Single('(')));
+    }
+
+    macro_rules! token_eq {
+        ($actual:expr, $value:expr, $lexeme:expr, $line:expr, $column:expr) => {
+            assert_eq!($actual, Ok(Token{
+                value: $value,
+                lexeme: Lexeme::from_str($lexeme),
+                line: $line,
+                column: $column,
+            }));
+        }
+    }
+
+    #[test]
+    fn single_keyword() {
+        let mut lex = Lexer::from_source("if");
+        token_eq!(lex.next(), TokenValue::Keyword(Keyword::If), "if", 1, 1);
+        token_eq!(lex.next(), TokenValue::None, "", 1, 3);
+    }
+
+    #[test]
+    fn single_identifier() {
+        let mut lex = Lexer::from_source("iff");
+        assert_token!(lex.next(), TokenType::Identifier);
+        assert_token!(lex.next(), TokenType::EndOfSource);
+    }
+
+    #[test]
+    fn single_integral_number() {
+        let mut lex = Lexer::from_source("1234");
+        assert_token!(lex.next(), TokenType::IntegralNumber);
+        assert_token!(lex.next(), TokenType::EndOfSource);
+    }
+
+    #[test]
+    fn single_floating_number() {
+        let mut lex = Lexer::from_source("12.34");
+        assert_token!(lex.next(), TokenType::FloatingNumber);
+        assert_token!(lex.next(), TokenType::EndOfSource);
+    }
+
+    #[test]
+    fn single_string() {
+        let mut lex = Lexer::from_source("\"simple string\"");
+        assert_token!(lex.next(), TokenType::String);
+        assert_token!(lex.next(), TokenType::EndOfSource);
+    }
+
+    #[test]
+    fn single_unterminated_string() {
+        let mut lex = Lexer::from_source("\"simple");
+        assert_eq!(lex.next(), Err(LexerError::UnexpectedEndOfSource(1, 8)));
     }
 }
