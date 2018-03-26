@@ -42,11 +42,20 @@ keywords! {
     "in" => In
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Special {
+    Single(char),
+    #[allow(dead_code)]
+    Double(char, char),
+    #[allow(dead_code)]
+    Triple(char, char, char),
+}
+
 /// Storage for values stored in a single token
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum TokenValue {
     None,
-    SingleChar(char),
+    Special(Special),
     Identifier,
     IntegralNumber(i32),
     FloatingNumber(f32),
@@ -57,7 +66,7 @@ pub enum TokenValue {
 /// Type of the token
 #[derive(Copy, Clone, PartialEq)]
 pub enum TokenType {
-    SingleChar(char),
+    Special(Special),
     Identifier,
     IntegralNumber,
     FloatingNumber,
@@ -69,7 +78,7 @@ pub enum TokenType {
 impl fmt::Debug for TokenType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            TokenType::SingleChar(ch) => write!(f, "`{}`", ch)?,
+            TokenType::Special(ch) => write!(f, "`{:?}`", ch)?,
             TokenType::Identifier => write!(f, "identifier")?,
             TokenType::IntegralNumber => write!(f, "integral literal")?,
             TokenType::FloatingNumber => write!(f, "floating literal")?,
@@ -114,20 +123,20 @@ impl<'a> Token<'a> {
     /// Returns type of the token
     pub fn get_type(&self) -> TokenType {
         match self.value {
-            TokenValue::SingleChar(ch) => TokenType::SingleChar(ch),
+            TokenValue::Special(special) => TokenType::Special(special),
             TokenValue::Identifier => TokenType::Identifier,
             TokenValue::Keyword(kw) => TokenType::Keyword(kw),
             TokenValue::IntegralNumber(_) => TokenType::IntegralNumber,
             TokenValue::FloatingNumber(_) => TokenType::FloatingNumber,
             TokenValue::None => TokenType::EndOfSource,
-            _ => unimplemented!(),
+            TokenValue::String(_) => TokenType::String,
         }
     }
 
-    /// Returns the char that is representing the token when it is a single char
-    pub fn get_char(&self) -> Option<char> {
+    /// Returns the char that is representing the token when it is a special
+    pub fn get_special(&self) -> Option<Special> {
         match self.value {
-            TokenValue::SingleChar(ch) => Some(ch),
+            TokenValue::Special(special) => Some(special),
             _ => None
         }
     }
@@ -218,7 +227,17 @@ impl<'a> Lexeme<'a> {
         &self.raw[self.start..self.start + self.length]
     }
 
+    /// Returns lexeme created from a str
+    pub fn from_str(str: &'a str) -> Lexeme<'a> {
+        Lexeme {
+            raw: str,
+            start: 0,
+            length: str.bytes().len(),
+        }
+    }
+
     /// Checks whether current lexeme directly adjoins with the other
+    #[allow(dead_code)]
     pub fn adjoins_with(&self, other: &Lexeme<'a>) -> bool {
         self.raw.as_ptr() == other.raw.as_ptr() && other.start - self.start == self.length
     }
@@ -230,8 +249,14 @@ impl<'a> fmt::Debug for Lexeme<'a> {
     }
 }
 
+impl<'a> Default for Lexeme<'a> {
+    fn default() -> Lexeme<'a> {
+        Lexeme::from_str("")
+    }
+}
+
 /// Error returned by lexer
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum LexerError {
     UnexpectedEndOfSource(usize, usize),
 }
@@ -246,7 +271,7 @@ impl<'a> Lexer<'a> {
             Some(ch) if self.can_start_identifier(ch) => self.match_keyword_or_identifier()?,
             Some(ch) if ch.is_digit(10) => self.match_number()?,
             Some('"') => self.match_string()?,
-            Some(ch) => self.match_single(ch)?,
+            Some(ch) => self.match_special(ch)?,
             None => self.match_end_of_source()?,
         };
         Ok(token)
@@ -338,8 +363,8 @@ impl<'a> Lexer<'a> {
         Lexeme { start: idx_start, length: idx_end - idx_start, raw: self.source }
     }
 
-    /// Returns current token when it is a single character
-    fn match_single(&mut self, ch: char) -> LexerResult<Token<'a>> {
+    /// Returns current token when it is built of one or more special chars
+    fn match_special(&mut self, first: char) -> LexerResult<Token<'a>> {
         let (line, column) = (self.line, self.column);
         let lexeme = {
             let start_idx = self.position;
@@ -347,7 +372,7 @@ impl<'a> Lexer<'a> {
             self.take_slice_from(start_idx)
         };
         Ok(Token {
-            value: TokenValue::SingleChar(ch),
+            value: TokenValue::Special(Special::Single(first)),
             lexeme,
             line,
             column,
@@ -355,10 +380,9 @@ impl<'a> Lexer<'a> {
     }
 
     fn match_end_of_source(&mut self) -> LexerResult<Token<'a>> {
-        let idx_start = self.position;
         Ok(Token {
             value: TokenValue::None,
-            lexeme: self.take_slice_from(idx_start),
+            lexeme: Lexeme::default(),
             line: self.line,
             column: self.column,
         })
@@ -408,7 +432,7 @@ impl<'a> Lexer<'a> {
     fn advance_while_digits(&mut self) {
         loop {
             match self.peek() {
-                Some('0' ... '9') | Some('_') => self.advance().unwrap(),
+                Some('0'...'9') | Some('_') => self.advance().unwrap(),
                 _ => break,
             };
         }

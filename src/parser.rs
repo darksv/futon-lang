@@ -1,5 +1,5 @@
 use std::fmt;
-use super::{Lexer, Token, TokenType, Keyword};
+use super::{Lexer, Token, TokenType, Keyword, Special};
 
 
 pub struct Parser<'a> {
@@ -84,20 +84,20 @@ impl<'a> Parser<'a> {
     fn parse_func(&mut self) -> ParseResult<Item> {
         self.expect_keyword(Keyword::Func)?;
         let identifier = self.expect_identifier()?.as_string();
-        self.expect_symbol('(')?;
+        self.expect_single('(')?;
         let mut args = vec![];
         while let Some(t) = self.match_identifier() {
             args.push(Argument {
                 name: t.as_string(),
             });
-            if self.match_symbol(',').is_none() {
+            if self.match_single(',').is_none() {
                 break;
             }
         }
-        self.expect_symbol(')')?;
-        self.expect_symbol('{')?;
+        self.expect_single(')')?;
+        self.expect_single('{')?;
         let body = self.parse_stmts()?;
-        self.expect_symbol('}')?;
+        self.expect_single('}')?;
         Ok(Item::Function { name: identifier, args, body })
     }
 
@@ -147,22 +147,22 @@ impl<'a> Parser<'a> {
         let identifier = self.expect_identifier()?.as_string();
         self.expect_keyword(Keyword::In)?;
         let expr = self.parse_expr()?;
-        self.expect_symbol('{')?;
+        self.expect_single('{')?;
         let items = self.parse_stmts()?;
-        self.expect_symbol('}')?;
+        self.expect_single('}')?;
         Ok(Item::ForIn { name: identifier.to_owned(), expr, body: items })
     }
 
     fn parse_if(&mut self) -> ParseResult<Item> {
         self.expect_keyword(Keyword::If)?;
         let condition = self.parse_expr()?;
-        self.expect_symbol('{')?;
+        self.expect_single('{')?;
         let arm_true = self.parse_stmts()?;
-        self.expect_symbol('}')?;
+        self.expect_single('}')?;
         let arm_false = if self.match_keyword(Keyword::Else).is_some() {
-            self.expect_symbol('{')?;
+            self.expect_single('{')?;
             let false_arm = self.parse_stmts()?;
-            self.expect_symbol('}')?;
+            self.expect_single('}')?;
             Some(false_arm)
         } else {
             None
@@ -221,16 +221,26 @@ impl<'a> Parser<'a> {
     }
 
     /// Consumes and returns next token, otherwise returns an error
-    fn expect_symbol(&mut self, symbol: char) -> ParseResult<Token<'a>> {
+    fn expect_single(&mut self, symbol: char) -> ParseResult<Token<'a>> {
+        self.expect_symbol(Special::Single(symbol))
+    }
+
+    /// Consumes and returns next token only if it is a char given by argument
+    fn match_single(&mut self, symbol: char) -> Option<Token<'a>> {
+        self.match_symbol(Special::Single(symbol))
+    }
+
+    /// Consumes and returns next token, otherwise returns an error
+    fn expect_symbol(&mut self, symbol: Special) -> ParseResult<Token<'a>> {
         match self.match_symbol(symbol) {
             Some(token) => Ok(token),
-            None => Err(self.expected(TokenType::SingleChar(symbol)))
+            None => Err(self.expected(TokenType::Special(symbol)))
         }
     }
 
     /// Consumes and returns next token only if it is a char given by argument
-    fn match_symbol(&mut self, symbol: char) -> Option<Token<'a>> {
-        if self.peek().get_char() == Some(symbol) {
+    fn match_symbol(&mut self, symbol: Special) -> Option<Token<'a>> {
+        if self.peek().get_special() == Some(symbol) {
             Some(self.advance())
         } else {
             None
