@@ -96,7 +96,7 @@ pub struct Token<'a> {
     /// Value stored in the token
     value: TokenValue,
     /// Slice of the raw source with raw representation of the token
-    lexeme: Lexeme<'a>,
+    span: SourceSpan<'a>,
     /// Number of the line that the token in the source starts at
     line: usize,
     /// Number of the column that the token in the source starts at
@@ -106,8 +106,8 @@ pub struct Token<'a> {
 /// Single lexical unit of the source, eg. identifier, literals, etc
 impl<'a> Token<'a> {
     /// Returns raw slice of the input that represents the token in the source
-    pub fn get_lexeme(&self) -> Lexeme<'a> {
-        self.lexeme
+    pub fn get_span(&self) -> SourceSpan<'a> {
+        self.span
     }
 
     /// Returns line number at which exists the first char of the token
@@ -161,7 +161,7 @@ impl<'a> Token<'a> {
     pub fn as_slice(&'a self) -> &'a str {
         match self.value {
             TokenValue::String(ref s) => &s[..],
-            _ => self.get_lexeme().as_slice(),
+            _ => self.get_span().as_slice(),
         }
     }
 
@@ -173,7 +173,8 @@ impl<'a> Token<'a> {
 
 impl<'a> fmt::Debug for Token<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?} at {}:{}", self.value, self.line, self.column)
+        write!(f, "{:?} at {}:{}", self.value, self.line, self.column)?;
+        Ok(())
     }
 }
 
@@ -210,54 +211,55 @@ impl<'a> Lexer<'a> {
     }
 }
 
-/// Custom slice that holds lexeme extracted from source
+/// Custom slice that holds lexeme in the source
 #[derive(Copy, Clone)]
-pub struct Lexeme<'a> {
-    /// Starting position of the lexeme in the source
+pub struct SourceSpan<'a> {
+    /// Index of the first character of the token in the source
     start: usize,
-    /// Length of the lexeme (in bytes)
+    /// Length of token (in bytes)
     length: usize,
-    /// Source that lexeme refers to
-    raw: &'a str,
+    /// Source that span refers to
+    source: &'a str,
 }
 
-impl<'a> Lexeme<'a> {
+impl<'a> SourceSpan<'a> {
     /// Returns plain slice of the source
     pub fn as_slice(&self) -> &'a str {
-        &self.raw[self.start..self.start + self.length]
+        &self.source[self.start..self.start + self.length]
     }
 
-    /// Returns lexeme created from a str
-    pub fn from_str(str: &'a str) -> Lexeme<'a> {
-        Lexeme {
-            raw: str,
+    /// Returns span created from a str
+    pub fn from_str(str: &'a str) -> SourceSpan<'a> {
+        SourceSpan {
+            source: str,
             start: 0,
             length: str.bytes().len(),
         }
     }
 
-    /// Checks whether current lexeme directly adjoins with the other
+    /// Checks whether current span directly adjoins with the other
     #[allow(dead_code)]
-    pub fn adjoins_with(&self, other: &Lexeme<'a>) -> bool {
-        self.raw.as_ptr() == other.raw.as_ptr() && other.start - self.start == self.length
+    pub fn adjoins_with(&self, other: &SourceSpan<'a>) -> bool {
+        self.source.as_ptr() == other.source.as_ptr() && other.start - self.start == self.length
     }
 }
 
-impl<'a> PartialEq for Lexeme<'a> {
-    fn eq(&self, other: &Lexeme<'a>) -> bool {
+impl<'a> PartialEq for SourceSpan<'a> {
+    fn eq(&self, other: &SourceSpan<'a>) -> bool {
         self.as_slice() == other.as_slice()
     }
 }
 
-impl<'a> fmt::Debug for Lexeme<'a> {
+impl<'a> fmt::Debug for SourceSpan<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", &self.raw[self.start..self.start + self.length])
+        write!(f, "{:?}", &self.source[self.start..self.start + self.length])?;
+        Ok(())
     }
 }
 
-impl<'a> Default for Lexeme<'a> {
-    fn default() -> Lexeme<'a> {
-        Lexeme::from_str("")
+impl<'a> Default for SourceSpan<'a> {
+    fn default() -> SourceSpan<'a> {
+        SourceSpan::from_str("")
     }
 }
 
@@ -325,12 +327,12 @@ impl<'a> Lexer<'a> {
                 break;
             }
         }
-        let lexeme = self.take_slice_from(idx_start);
-        let kind = match self.get_keyword(lexeme.as_slice()) {
+        let span = self.create_span_from(idx_start);
+        let kind = match self.get_keyword(span.as_slice()) {
             Some(keyword) => TokenValue::Keyword(keyword),
             None => TokenValue::Identifier,
         };
-        Ok(Token { value: kind, lexeme, line, column })
+        Ok(Token { value: kind, span, line, column })
     }
 
     /// Returns current token when it is a string literal
@@ -357,29 +359,30 @@ impl<'a> Lexer<'a> {
         }
         Ok(Token {
             value: TokenValue::String(string),
-            lexeme: self.take_slice_from(idx_start),
+            span: self.create_span_from(idx_start),
             line,
             column,
         })
     }
 
-    /// Returns slice of the source starting from a given index and ending at current index
-    fn take_slice_from(&mut self, idx_start: usize) -> Lexeme<'a> {
+    /// Returns a span of the source starting at a given index and ending at current index
+    fn create_span_from(&mut self, idx_start: usize) -> SourceSpan<'a> {
         let idx_end = self.peek_index().unwrap_or(self.source.len());
-        Lexeme { start: idx_start, length: idx_end - idx_start, raw: self.source }
+        SourceSpan { start: idx_start, length: idx_end - idx_start, source: self.source }
     }
 
     /// Returns current token when it is built of one or more special chars
     fn match_special(&mut self, first: char) -> LexerResult<Token<'a>> {
         let (line, column) = (self.line, self.column);
-        let lexeme = {
+        let span = {
             let start_idx = self.position;
             self.advance().unwrap();
-            self.take_slice_from(start_idx)
+            self.create_span_from(start_idx)
         };
+
         Ok(Token {
             value: TokenValue::Special(Special::Single(first)),
-            lexeme,
+            span,
             line,
             column,
         })
@@ -388,7 +391,7 @@ impl<'a> Lexer<'a> {
     fn match_end_of_source(&mut self) -> LexerResult<Token<'a>> {
         Ok(Token {
             value: TokenValue::None,
-            lexeme: Lexeme::default(),
+            span: SourceSpan::default(),
             line: self.line,
             column: self.column,
         })
@@ -423,16 +426,16 @@ impl<'a> Lexer<'a> {
             is_floating = true;
         };
 
-        let lexeme = self.take_slice_from(idx_start);
+        let span = self.create_span_from(idx_start);
         let value = if is_floating {
-            let parsed = lexeme.as_slice().parse::<f32>().unwrap();
+            let parsed = span.as_slice().parse::<f32>().unwrap();
             TokenValue::FloatingNumber(parsed)
         } else {
-            let parsed = lexeme.as_slice().parse::<i32>().unwrap();
+            let parsed = span.as_slice().parse::<i32>().unwrap();
             TokenValue::IntegralNumber(parsed)
         };
 
-        Ok(Token { value, lexeme, line, column })
+        Ok(Token { value, span, line, column })
     }
 
     fn advance_while_digits(&mut self) {
@@ -500,7 +503,7 @@ impl<'a> Lexer<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Lexer, LexerError, Token, Lexeme, TokenType, TokenValue, Keyword, Special};
+    use super::{Lexer, LexerError, Token, SourceSpan, TokenType, TokenValue, Keyword, Special};
 
     macro_rules! assert_token {
         ($actual:expr, $expected:expr) => {
@@ -527,10 +530,10 @@ mod tests {
     }
 
     macro_rules! token_eq {
-        ($actual:expr, $value:expr, $lexeme:expr, $line:expr, $column:expr) => {
+        ($actual:expr, $value:expr, $span:expr, $line:expr, $column:expr) => {
             assert_eq!($actual, Ok(Token{
                 value: $value,
-                lexeme: Lexeme::from_str($lexeme),
+                span: SourceSpan::from_str($span),
                 line: $line,
                 column: $column,
             }));
