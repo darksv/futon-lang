@@ -97,10 +97,6 @@ pub struct Token<'a> {
     value: TokenValue,
     /// Slice of the raw source with raw representation of the token
     span: SourceSpan<'a>,
-    /// Number of the line that the token in the source starts at
-    line: usize,
-    /// Number of the column that the token in the source starts at
-    column: usize,
 }
 
 /// Single lexical unit of the source, eg. identifier, literals, etc
@@ -111,13 +107,13 @@ impl<'a> Token<'a> {
     }
 
     /// Returns line number at which exists the first char of the token
-    pub fn get_line(&self) -> usize {
-        self.line
+    pub fn line(&self) -> usize {
+        self.span.line
     }
 
     /// Returns column number at which exists the first char of the token
-    pub fn get_column(&self) -> usize {
-        self.column
+    pub fn column(&self) -> usize {
+        self.span.column
     }
 
     /// Returns type of the token
@@ -173,7 +169,7 @@ impl<'a> Token<'a> {
 
 impl<'a> fmt::Debug for Token<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?} at {}:{}", self.value, self.line, self.column)?;
+        write!(f, "{:?} at {}:{}", self.value, self.line(), self.column())?;
         Ok(())
     }
 }
@@ -220,20 +216,30 @@ pub struct SourceSpan<'a> {
     length: usize,
     /// Source that span refers to
     source: &'a str,
+    /// Line number the span starts at
+    line: usize,
+    /// Column number the span starts at
+    column: usize,
 }
 
 impl<'a> SourceSpan<'a> {
     /// Returns plain slice of the source
     pub fn as_slice(&self) -> &'a str {
-        &self.source[self.start..self.start + self.length]
+        if self.length > 0 {
+            &self.source[self.start..self.start + self.length]
+        } else {
+            ""
+        }
     }
 
     /// Returns span created from a str
-    pub fn from_str(str: &'a str) -> SourceSpan<'a> {
+    pub fn from_str(str: &'a str, line: usize, column: usize) -> SourceSpan<'a> {
         SourceSpan {
             source: str,
             start: 0,
             length: str.bytes().len(),
+            line,
+            column,
         }
     }
 
@@ -257,12 +263,6 @@ impl<'a> fmt::Debug for SourceSpan<'a> {
     }
 }
 
-impl<'a> Default for SourceSpan<'a> {
-    fn default() -> SourceSpan<'a> {
-        SourceSpan::from_str("")
-    }
-}
-
 /// Error returned by lexer
 #[derive(Debug, PartialEq)]
 pub enum LexerError {
@@ -270,6 +270,38 @@ pub enum LexerError {
 }
 
 pub type LexerResult<T> = Result<T, LexerError>;
+
+
+/// Handle for a new source span
+struct SourceSpanHandle {
+    start_position: usize,
+    line: usize,
+    column: usize,
+}
+
+impl SourceSpanHandle {
+    /// Returns span handle for current lexer
+    fn new(lexer: &Lexer) -> Self {
+        let (line, column) = (lexer.line, lexer.column);
+        Self {
+            start_position: lexer.position,
+            line,
+            column,
+        }
+    }
+
+    /// Returns new span created from handle, ending at current lexer position
+    fn get_span<'a>(self, lexer: &Lexer<'a>) -> SourceSpan<'a> {
+        let end_position = lexer.position;
+        SourceSpan {
+            start: self.start_position,
+            length: end_position - self.start_position,
+            source: lexer.source,
+            line: self.line,
+            column: self.column,
+        }
+    }
+}
 
 impl<'a> Lexer<'a> {
     /// Returns next token from the source
@@ -318,8 +350,7 @@ impl<'a> Lexer<'a> {
 
     /// Returns current token when it is a keyword or an identifier
     fn match_keyword_or_identifier(&mut self) -> LexerResult<Token<'a>> {
-        let (line, column) = (self.line, self.column);
-        let idx_start = self.position;
+        let handle = self.begin_span();
         while let Some(ch) = self.peek() {
             if self.can_be_in_identifier(ch) {
                 self.advance().unwrap();
@@ -327,18 +358,17 @@ impl<'a> Lexer<'a> {
                 break;
             }
         }
-        let span = self.create_span_from(idx_start);
+        let span = handle.get_span(self);
         let kind = match self.get_keyword(span.as_slice()) {
             Some(keyword) => TokenValue::Keyword(keyword),
             None => TokenValue::Identifier,
         };
-        Ok(Token { value: kind, span, line, column })
+        Ok(Token { value: kind, span })
     }
 
     /// Returns current token when it is a string literal
     fn match_string(&mut self) -> LexerResult<Token<'a>> {
-        let (line, column) = (self.line, self.column);
-        let idx_start = self.position;
+        let handle = self.begin_span();
         // '"'
         self.advance().unwrap();
         let mut string = String::new();
@@ -359,48 +389,34 @@ impl<'a> Lexer<'a> {
         }
         Ok(Token {
             value: TokenValue::String(string),
-            span: self.create_span_from(idx_start),
-            line,
-            column,
+            span: handle.get_span(self),
         })
-    }
-
-    /// Returns a span of the source starting at a given index and ending at current index
-    fn create_span_from(&mut self, idx_start: usize) -> SourceSpan<'a> {
-        let idx_end = self.peek_index().unwrap_or(self.source.len());
-        SourceSpan { start: idx_start, length: idx_end - idx_start, source: self.source }
     }
 
     /// Returns current token when it is built of one or more special chars
     fn match_special(&mut self, first: char) -> LexerResult<Token<'a>> {
-        let (line, column) = (self.line, self.column);
+        let handle = self.begin_span();
         let span = {
-            let start_idx = self.position;
             self.advance().unwrap();
-            self.create_span_from(start_idx)
+            handle.get_span(self)
         };
 
         Ok(Token {
             value: TokenValue::Special(Special::Single(first)),
             span,
-            line,
-            column,
         })
     }
 
     fn match_end_of_source(&mut self) -> LexerResult<Token<'a>> {
         Ok(Token {
             value: TokenValue::None,
-            span: SourceSpan::default(),
-            line: self.line,
-            column: self.column,
+            span: self.begin_span().get_span(self),
         })
     }
 
     /// Returns current token when it is a number
     fn match_number(&mut self) -> LexerResult<Token<'a>> {
-        let (line, column) = (self.line, self.column);
-        let idx_start = self.position;
+        let handle = self.begin_span();
         let mut is_floating = false;
         self.advance_while_digits();
         if let Some('.') = self.peek() {
@@ -426,7 +442,7 @@ impl<'a> Lexer<'a> {
             is_floating = true;
         };
 
-        let span = self.create_span_from(idx_start);
+        let span = handle.get_span(self);
         let value = if is_floating {
             let parsed = span.as_slice().parse::<f32>().unwrap();
             TokenValue::FloatingNumber(parsed)
@@ -435,7 +451,7 @@ impl<'a> Lexer<'a> {
             TokenValue::IntegralNumber(parsed)
         };
 
-        Ok(Token { value, span, line, column })
+        Ok(Token { value, span })
     }
 
     fn advance_while_digits(&mut self) {
@@ -496,8 +512,15 @@ impl<'a> Lexer<'a> {
         }
         if let Some(idx) = self.peek_index() {
             self.position = idx;
+        } else {
+            self.position = self.source.len()
         }
         Some(ch)
+    }
+
+    /// Returns a span handle for current lexer position
+    fn begin_span(&mut self) -> SourceSpanHandle {
+        SourceSpanHandle::new(self)
     }
 }
 
@@ -505,74 +528,88 @@ impl<'a> Lexer<'a> {
 mod tests {
     use super::{Lexer, LexerError, Token, SourceSpan, TokenType, TokenValue, Keyword, Special};
 
-    macro_rules! assert_token {
-        ($actual:expr, $expected:expr) => {
-            assert_eq!($actual.map(|token| token.get_type()), Ok($expected));
+    macro_rules! assert_token_type_eq {
+        ($actual:expr, $expected:expr, $line:expr, $column:expr) => {
+            let token = $actual;
+            let token = token.as_ref();
+            assert_eq!(token.map(|t| t.get_type()), Ok($expected), "token type");
+            assert_eq!(token.map(|t| t.line()), Ok($line), "line number");
+            assert_eq!(token.map(|t| t.column()), Ok($column), "column number");
+        }
+    }
+
+    macro_rules! assert_token_eq {
+        ($actual:expr, $value:expr, $span:expr, $line:expr, $column:expr) => {
+            let token = $actual;
+            let token = token.as_ref();
+            assert_eq!(token, Ok(&Token{
+                value: $value,
+                span: SourceSpan::from_str($span, $line, $column),
+            }), "token value");
+            assert_eq!(token.map(|t| t.line()), Ok($line), "line number");
+            assert_eq!(token.map(|t| t.column()), Ok($column), "column number");
         }
     }
 
     #[test]
     fn empty() {
         let mut lex = Lexer::from_source("");
-        assert_token!(lex.next(), TokenType::EndOfSource);
+        assert_token_type_eq!(lex.next(), TokenType::EndOfSource, 1, 1);
     }
 
     #[test]
     fn only_whitespace() {
         let mut lex = Lexer::from_source("  \t\n   \n");
-        assert_token!(lex.next(), TokenType::EndOfSource);
+        assert_token_type_eq!(lex.next(), TokenType::EndOfSource, 3, 1);
     }
 
     #[test]
     fn single_special_char() {
         let mut lex = Lexer::from_source("(");
-        assert_token!(lex.next(), TokenType::Special(Special::Single('(')));
-    }
-
-    macro_rules! token_eq {
-        ($actual:expr, $value:expr, $span:expr, $line:expr, $column:expr) => {
-            assert_eq!($actual, Ok(Token{
-                value: $value,
-                span: SourceSpan::from_str($span),
-                line: $line,
-                column: $column,
-            }));
-        }
+        assert_token_type_eq!(lex.next(), TokenType::Special(Special::Single('(')), 1, 1);
+        assert_token_eq!(lex.next(), TokenValue::None, "", 1, 2);
     }
 
     #[test]
     fn single_keyword() {
         let mut lex = Lexer::from_source("if");
-        token_eq!(lex.next(), TokenValue::Keyword(Keyword::If), "if", 1, 1);
-        token_eq!(lex.next(), TokenValue::None, "", 1, 3);
+        assert_token_eq!(lex.next(), TokenValue::Keyword(Keyword::If), "if", 1, 1);
+        assert_token_eq!(lex.next(), TokenValue::None, "", 1, 3);
     }
 
     #[test]
     fn single_identifier() {
         let mut lex = Lexer::from_source("iff");
-        assert_token!(lex.next(), TokenType::Identifier);
-        assert_token!(lex.next(), TokenType::EndOfSource);
+        assert_token_eq!(lex.next(), TokenValue::Identifier, "iff", 1, 1);
+        assert_token_eq!(lex.next(), TokenValue::None, "", 1, 4);
+    }
+
+    #[test]
+    fn single_identifier_surrounded_by_whitespace() {
+        let mut lex = Lexer::from_source(" iff  ");
+        assert_token_eq!(lex.next(), TokenValue::Identifier, "iff", 1, 2);
+        assert_token_eq!(lex.next(), TokenValue::None, "", 1, 7);
     }
 
     #[test]
     fn single_integral_number() {
         let mut lex = Lexer::from_source("1234");
-        assert_token!(lex.next(), TokenType::IntegralNumber);
-        assert_token!(lex.next(), TokenType::EndOfSource);
+        assert_token_type_eq!(lex.next(), TokenType::IntegralNumber, 1, 1);
+        assert_token_type_eq!(lex.next(), TokenType::EndOfSource, 1, 5);
     }
 
     #[test]
     fn single_floating_number() {
         let mut lex = Lexer::from_source("12.34");
-        assert_token!(lex.next(), TokenType::FloatingNumber);
-        assert_token!(lex.next(), TokenType::EndOfSource);
+        assert_token_type_eq!(lex.next(), TokenType::FloatingNumber, 1, 1);
+        assert_token_type_eq!(lex.next(), TokenType::EndOfSource, 1, 6);
     }
 
     #[test]
     fn single_string() {
         let mut lex = Lexer::from_source("\"simple string\"");
-        assert_token!(lex.next(), TokenType::String);
-        assert_token!(lex.next(), TokenType::EndOfSource);
+        assert_token_type_eq!(lex.next(), TokenType::String, 1, 1);
+        assert_token_type_eq!(lex.next(), TokenType::EndOfSource, 1, 16);
     }
 
     #[test]

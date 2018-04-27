@@ -193,8 +193,8 @@ impl<'a> Parser<'a> {
         let token = self.peek();
         ParseError::UnexpectedToken(
             TokenType::EndOfSource,
-            token.get_line(),
-            token.get_column(),
+            token.line(),
+            token.column(),
             Some(token_type),
         )
     }
@@ -256,7 +256,8 @@ impl<'a> Parser<'a> {
     /// Returns next token and consumes it
     fn advance(&mut self) -> Token<'a> {
         self.ensure_peeked();
-        self.peeked.take().unwrap()
+        let token = self.peeked.take().unwrap();
+        token
     }
 
     /// Ensures that next token (if any) is taken from lexer
