@@ -307,7 +307,7 @@ impl<'a> Lexer<'a> {
     /// Returns next token from the source
     pub fn next(&mut self) -> LexerResult<Token<'a>> {
         self.skip_space();
-        let token = match self.peek() {
+        let token = match self.peek(0) {
             Some(ch) if self.can_start_identifier(ch) => self.match_keyword_or_identifier()?,
             Some(ch) if ch.is_digit(10) => self.match_number()?,
             Some('"') => self.match_string()?,
@@ -339,7 +339,7 @@ impl<'a> Lexer<'a> {
 
     /// Skips all whitespaces
     fn skip_space(&mut self) {
-        while let Some(ch) = self.peek() {
+        while let Some(ch) = self.peek(0) {
             if ch.is_whitespace() {
                 self.advance().unwrap();
             } else {
@@ -351,7 +351,7 @@ impl<'a> Lexer<'a> {
     /// Returns current token when it is a keyword or an identifier
     fn match_keyword_or_identifier(&mut self) -> LexerResult<Token<'a>> {
         let handle = self.begin_span();
-        while let Some(ch) = self.peek() {
+        while let Some(ch) = self.peek(0) {
             if self.can_be_in_identifier(ch) {
                 self.advance().unwrap();
             } else {
@@ -373,7 +373,7 @@ impl<'a> Lexer<'a> {
         self.advance().unwrap();
         let mut string = String::new();
         loop {
-            match self.peek() {
+            match self.peek(0) {
                 Some(ch) => match ch {
                     '"' => {
                         self.advance().unwrap();
@@ -419,12 +419,12 @@ impl<'a> Lexer<'a> {
         let handle = self.begin_span();
         let mut is_floating = false;
         self.advance_while_digits();
-        if let Some('.') = self.peek() {
+        if let Some('.') = self.peek(0) {
             self.advance().unwrap();
             self.advance_while_digits();
             is_floating = true;
         }
-        let has_exponent = match self.peek() {
+        let has_exponent = match self.peek(0) {
             Some('e') | Some('E') => {
                 self.advance().unwrap();
                 true
@@ -432,7 +432,7 @@ impl<'a> Lexer<'a> {
             _ => false
         };
         if has_exponent {
-            match self.peek() {
+            match self.peek(0) {
                 Some('+') | Some('-') => {
                     self.advance().unwrap();
                 }
@@ -456,7 +456,7 @@ impl<'a> Lexer<'a> {
 
     fn advance_while_digits(&mut self) {
         loop {
-            match self.peek() {
+            match self.peek(0) {
                 Some('0'...'9') | Some('_') => self.advance().unwrap(),
                 _ => break,
             };
@@ -472,16 +472,22 @@ impl<'a> Lexer<'a> {
             .next()
     }
 
-    /// Returns current character without advancing the iterator
+    /// Returns next nth character without advancing the iterator
     #[inline]
-    fn peek(&mut self) -> Option<char> {
+    fn peek(&mut self, nth: usize) -> Option<char> {
+        if nth != 0 {
+            unimplemented!();
+        }
         self.ensure_peeked();
         self.peeked.map(|x| x.1)
     }
 
-    /// Returns current character index without advancing the iterator
+    /// Returns next nth character index without advancing the iterator
     #[inline]
-    fn peek_index(&mut self) -> Option<usize> {
+    fn peek_index(&mut self, nth: usize) -> Option<usize> {
+        if nth != 0 {
+            unimplemented!();
+        }
         self.ensure_peeked();
         self.peeked.map(|x| x.0)
     }
@@ -496,7 +502,7 @@ impl<'a> Lexer<'a> {
 
     // Advances the iterator and returns consumed character
     fn advance(&mut self) -> Option<char> {
-        self.peek()?;
+        self.peek(0)?;
         let (_idx, ch) = self.peeked.take()?;
         match ch {
             '\n' => {
@@ -510,7 +516,7 @@ impl<'a> Lexer<'a> {
                 self.column += 1;
             }
         }
-        if let Some(idx) = self.peek_index() {
+        if let Some(idx) = self.peek_index(0) {
             self.position = idx;
         } else {
             self.position = self.source.len()
