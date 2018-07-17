@@ -245,7 +245,7 @@ impl<'a> Parser<'a> {
     fn expected(&mut self, token_type: TokenType) -> ParseError {
         let token = self.peek(0);
         ParseError::UnexpectedToken(
-            TokenType::EndOfSource,
+            token.get_type(),
             token.line(),
             token.column(),
             Some(token_type),
