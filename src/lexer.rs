@@ -42,20 +42,19 @@ keywords! {
     "in" => In
 }
 
+/// Kind of punctuation mark
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Special {
-    Single(char),
+pub enum PunctKind {
+    Single,
     #[allow(dead_code)]
-    Double(char, char),
-    #[allow(dead_code)]
-    Triple(char, char, char),
+    Joint,
 }
 
-/// Storage for values stored in a single token
+/// Storage for values associated in a single token
 #[derive(Clone, Debug, PartialEq)]
 pub enum TokenValue {
     None,
-    Special(Special),
+    Punct(char, PunctKind),
     Identifier,
     IntegralNumber(i32),
     FloatingNumber(f32),
@@ -66,7 +65,7 @@ pub enum TokenValue {
 /// Type of the token
 #[derive(Copy, Clone, PartialEq)]
 pub enum TokenType {
-    Special(Special),
+    Punct(char),
     Identifier,
     IntegralNumber,
     FloatingNumber,
@@ -78,7 +77,7 @@ pub enum TokenType {
 impl fmt::Debug for TokenType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            TokenType::Special(ch) => write!(f, "`{:?}`", ch)?,
+            TokenType::Punct(ch) => write!(f, "`{:?}`", ch)?,
             TokenType::Identifier => write!(f, "identifier")?,
             TokenType::IntegralNumber => write!(f, "integral literal")?,
             TokenType::FloatingNumber => write!(f, "floating literal")?,
@@ -119,7 +118,7 @@ impl<'a> Token<'a> {
     /// Returns type of the token
     pub fn get_type(&self) -> TokenType {
         match self.value {
-            TokenValue::Special(special) => TokenType::Special(special),
+            TokenValue::Punct(ch, _) => TokenType::Punct(ch),
             TokenValue::Identifier => TokenType::Identifier,
             TokenValue::Keyword(kw) => TokenType::Keyword(kw),
             TokenValue::IntegralNumber(_) => TokenType::IntegralNumber,
@@ -129,10 +128,10 @@ impl<'a> Token<'a> {
         }
     }
 
-    /// Returns the char that is representing the token when it is a special
-    pub fn get_special(&self) -> Option<Special> {
+    /// Returns the char that is representing the token when it is a punctuation mark
+    pub fn get_punct(&self) -> Option<(char, PunctKind)> {
         match self.value {
-            TokenValue::Special(special) => Some(special),
+            TokenValue::Punct(ch, kind) => Some((ch, kind)),
             _ => None
         }
     }
@@ -311,7 +310,7 @@ impl<'a> Lexer<'a> {
             Some(ch) if self.can_start_identifier(ch) => self.match_keyword_or_identifier()?,
             Some(ch) if ch.is_digit(10) => self.match_number()?,
             Some('"') => self.match_string()?,
-            Some(ch) => self.match_special(ch)?,
+            Some(ch) => self.match_punct(ch)?,
             None => self.match_end_of_source()?,
         };
         Ok(token)
@@ -393,8 +392,8 @@ impl<'a> Lexer<'a> {
         })
     }
 
-    /// Returns current token when it is built of one or more special chars
-    fn match_special(&mut self, first: char) -> LexerResult<Token<'a>> {
+    /// Returns current token when it is built of a single punctuation mark
+    fn match_punct(&mut self, first: char) -> LexerResult<Token<'a>> {
         let handle = self.begin_span();
         let span = {
             self.advance().unwrap();
@@ -402,7 +401,7 @@ impl<'a> Lexer<'a> {
         };
 
         Ok(Token {
-            value: TokenValue::Special(Special::Single(first)),
+            value: TokenValue::Punct(first, PunctKind::Single),
             span,
         })
     }
@@ -532,7 +531,7 @@ impl<'a> Lexer<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Lexer, LexerError, Token, SourceSpan, TokenType, TokenValue, Keyword, Special};
+    use super::{Lexer, LexerError, Token, SourceSpan, TokenType, TokenValue, Keyword, PunctKind};
 
     macro_rules! assert_token_type_eq {
         ($actual:expr, $expected:expr, $line:expr, $column:expr) => {
@@ -570,9 +569,9 @@ mod tests {
     }
 
     #[test]
-    fn single_special_char() {
+    fn single_punctuation_mark() {
         let mut lex = Lexer::from_source("(");
-        assert_token_type_eq!(lex.next(), TokenType::Special(Special::Single('(')), 1, 1);
+        assert_token_type_eq!(lex.next(), TokenType::Punct('('), 1, 1);
         assert_token_eq!(lex.next(), TokenValue::None, "", 1, 2);
     }
 

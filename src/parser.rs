@@ -1,5 +1,5 @@
 use std::fmt;
-use super::{Lexer, Token, TokenType, Keyword, Special};
+use super::{Lexer, Token, TokenType, Keyword, PunctKind};
 
 
 pub struct Parser<'a> {
@@ -221,26 +221,26 @@ impl<'a> Parser<'a> {
     }
 
     /// Consumes and returns next token, otherwise returns an error
-    fn expect_single(&mut self, symbol: char) -> ParseResult<Token<'a>> {
-        self.expect_symbol(Special::Single(symbol))
+    fn expect_single(&mut self, ch: char) -> ParseResult<Token<'a>> {
+        self.expect_punct(PunctKind::Single, ch)
     }
 
     /// Consumes and returns next token only if it is a char given by argument
-    fn match_single(&mut self, symbol: char) -> Option<Token<'a>> {
-        self.match_symbol(Special::Single(symbol))
+    fn match_single(&mut self, ch: char) -> Option<Token<'a>> {
+        self.match_punct(PunctKind::Single, ch)
     }
 
     /// Consumes and returns next token, otherwise returns an error
-    fn expect_symbol(&mut self, symbol: Special) -> ParseResult<Token<'a>> {
-        match self.match_symbol(symbol) {
+    fn expect_punct(&mut self, kind: PunctKind, ch: char) -> ParseResult<Token<'a>> {
+        match self.match_punct(kind, ch) {
             Some(token) => Ok(token),
-            None => Err(self.expected(TokenType::Special(symbol)))
+            None => Err(self.expected(TokenType::Punct(ch)))
         }
     }
 
     /// Consumes and returns next token only if it is a char given by argument
-    fn match_symbol(&mut self, symbol: Special) -> Option<Token<'a>> {
-        if self.peek().get_special() == Some(symbol) {
+    fn match_punct(&mut self, kind: PunctKind, ch: char) -> Option<Token<'a>> {
+        if self.peek().get_punct() == Some((ch, kind)) {
             Some(self.advance())
         } else {
             None

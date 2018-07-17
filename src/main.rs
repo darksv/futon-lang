@@ -1,7 +1,7 @@
 mod lexer;
 mod parser;
 
-use lexer::{Lexer, Token, TokenType, Keyword, Special};
+use lexer::{Lexer, Token, TokenType, Keyword, PunctKind};
 use parser::Parser;
 
 fn main() {
