@@ -400,8 +400,14 @@ impl<'a> Lexer<'a> {
             handle.get_span(self)
         };
 
+        let is_joint = self
+            .peek(0)
+            .map(|c| c.is_ascii_punctuation())
+            .unwrap_or(false);
+        let kind = if is_joint { PunctKind::Joint } else { PunctKind::Single };
+
         Ok(Token {
-            value: TokenValue::Punct(first, PunctKind::Single),
+            value: TokenValue::Punct(first, kind),
             span,
         })
     }

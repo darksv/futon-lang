@@ -1,4 +1,4 @@
-func main(koszi, jest, spoko) {
+func main(koszi: A, jest: B, spoko: C)-> D {
     for item in generator {
         if item {
             for iks in item {
@@ -13,7 +13,7 @@ func main(koszi, jest, spoko) {
                         return 1234
                     }
                 }
-                func main(koszi, jest, spoko) {
+                func main(koszi: A, jest: B, spoko: C)  {
                     for item in generator {
                         if item {
                             for iks in item {
