@@ -5,6 +5,7 @@ mod parser;
 
 use lexer::{Keyword, Lexer, PunctKind, Token, TokenType};
 use parser::Parser;
+use codegen::SourceBuilder;
 
 fn main() {
     use std::fs::File;
@@ -22,9 +23,10 @@ fn main() {
         let mut parser = Parser::new(&mut lex);
         match parser.parse() {
             Ok(k) => {
+                let mut s = SourceBuilder::new();
+                codegen::genc(&mut s, &k);
                 println!("// {}", entry.path().to_str().unwrap());
-                //            println!("{:#?}", k);
-                codegen::genc(&k, 0);
+                println!("{}", s.build());
             }
             Err(e) => println!("{:?}", e),
         }

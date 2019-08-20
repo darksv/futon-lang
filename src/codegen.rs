@@ -36,27 +36,71 @@ impl VariableHolder {
     }
 }
 
-pub fn genc(items: &[Item], n: usize) {
-    println!(r"#include <stdint.h>");
-    println!(r"typedef struct Slice {{ void* ptr; uint64_t len; }};");
 
-    let mut vars = VariableHolder::new();
-    for item in items {
-        indent(n);
-        genc_item(item, n, &mut vars);
+pub(crate) struct SourceBuilder {
+    buffer: String,
+    level: usize,
+    indented: bool,
+}
+
+impl SourceBuilder {
+    pub(crate) fn new() -> Self {
+        SourceBuilder {
+            buffer: String::new(),
+            level: 0,
+            indented: false,
+        }
+    }
+
+    pub(crate) fn build(self) -> String {
+        self.buffer
+    }
+
+    fn write(&mut self, s: &str) {
+        self.maybe_indent();
+        self.buffer.push_str(s);
+    }
+
+    fn maybe_indent(&mut self) {
+        if !self.indented {
+            self.buffer.push_str(&format!("{:width$}", "", width = self.level * 2));
+            self.indented = true;
+        }
+    }
+
+    fn writeln(&mut self, s: &str) {
+        self.maybe_indent();
+        self.buffer.push_str(s);
+        self.buffer.push('\n');
+        self.indented = false;
+    }
+
+    fn shift(&mut self) {
+        self.level += 1;
+    }
+
+    fn unshift(&mut self) {
+        self.level -= 1;
     }
 }
 
-fn genc_item(item: &Item, ind: usize, vars: &mut VariableHolder) {
+pub(crate) fn genc(fmt: &mut SourceBuilder, items: &[Item]) {
+    fmt.writeln(r"#include <stdint.h>");
+    fmt.writeln(r"typedef struct Slice { void* ptr; uint64_t len; };");
+
+    let mut vars = VariableHolder::new();
+    for item in items {
+        genc_item(fmt, item, &mut vars);
+    }
+}
+
+fn genc_item(fmt: &mut SourceBuilder, item: &Item, vars: &mut VariableHolder) {
     match item {
         Item::Let { name, ty, expr, .. } => {
-            indent(ind);
-            println!(
-                "{} {} = {};",
-                format_ty(ty.as_ref().unwrap()),
-                name,
-                format_expr(expr.as_ref().unwrap())
-            );
+            fmt.writeln(&format!("{} {} = {};",
+                               format_ty(ty.as_ref().unwrap()),
+                               name,
+                               format_expr(expr.as_ref().unwrap())));
             vars.def(name.clone(), ty.clone().unwrap(), expr.clone());
         }
         Item::Assignment {
@@ -64,11 +108,13 @@ fn genc_item(item: &Item, ind: usize, vars: &mut VariableHolder) {
             operator,
             expr,
         } => {
-            indent(ind);
-            if let Some(op) = operator {
-                println!("{} {}= {};", format_expr(lhs), op, format_expr(expr));
-            } else {
-                println!("{} = {};", format_expr(lhs), format_expr(expr));
+            match operator {
+                Some(op) => {
+                    fmt.writeln(&format!("{} {}= {};", format_expr(lhs), op, format_expr(expr)));
+                }
+                None => {
+                    fmt.writeln(&format!("{} = {};", format_expr(lhs), format_expr(expr)));
+                }
             }
         }
         Item::Function {
@@ -78,15 +124,14 @@ fn genc_item(item: &Item, ind: usize, vars: &mut VariableHolder) {
             body,
             ..
         } => {
-            indent(ind);
-            print!("{} {}(", format_ty(ty.as_ref().unwrap()), name);
+            fmt.write(&format!("{} {}(", format_ty(ty.as_ref().unwrap()), name));
             if args.is_empty() {
-                print!("void");
+                fmt.write("void");
             } else {
                 for (i, arg) in args.iter().enumerate() {
-                    print!("{} {}", format_ty(&arg.ty), arg.name);
+                    fmt.write(&format!("{} {}", format_ty(&arg.ty), arg.name));
                     if i != args.len() - 1 {
-                        print!(", ")
+                        fmt.write(", ");
                     }
                 }
 
@@ -95,32 +140,36 @@ fn genc_item(item: &Item, ind: usize, vars: &mut VariableHolder) {
                 }
             }
 
-            println!(") {{");
+            fmt.writeln(") {");
+            fmt.shift();
             for b in body {
-                genc_item(b, ind + 1, vars);
+                genc_item(fmt, b, vars);
             }
-            indent(ind);
-            println!("}}");
+            fmt.unshift();
+            fmt.writeln("}");
         }
         Item::If {
             condition,
             arm_true,
             arm_false,
         } => {
-            indent(ind);
-            println!("if ({}) {{", format_expr(condition));
+            fmt.writeln(&format!("if ({}) {{", format_expr(condition)));
+            fmt.shift();
             for item in arm_true {
-                genc_item(item, ind + 1, vars);
+                fmt.shift();
+                genc_item(fmt, item, vars);
+                fmt.unshift();
             }
             if let Some(arm_false) = arm_false {
-                indent(ind);
-                println!("}} else {{");
+                fmt.writeln("} else {");
                 for item in arm_false {
-                    genc_item(item, ind + 1, vars);
+                    fmt.shift();
+                    genc_item(fmt, item, vars);
+                    fmt.unshift();
                 }
             }
-            indent(ind);
-            println!("}}");
+            fmt.unshift();
+            fmt.writeln("}");
         }
         Item::ForIn {
             name: bound,
@@ -140,40 +189,38 @@ fn genc_item(item: &Item, ind: usize, vars: &mut VariableHolder) {
                 };
 
                 if let Some(n) = n {
-                    indent(ind);
-                    println!("for (int64_t i = 0; i < {}; ++i) {{", n);
-                    indent(ind + 1);
-                    println!("{} {} = {}[i];", format_ty(ty), bound, name);
+                    fmt.writeln(&format!("for (int64_t i = 0; i < {}; ++i) {{", n));
                 } else {
-                    indent(ind);
-                    println!("for (int64_t i = 0; i < {}.len; ++i) {{", name);
-                    indent(ind + 1);
-                    println!(
+                    fmt.writeln(&format!("for (int64_t i = 0; i < {}.len; ++i) {{", name));
+                }
+
+                fmt.shift();
+                if n.is_some() {
+                    fmt.writeln(&format!("{} {} = {}[i];", format_ty(ty), bound, name));
+                } else {
+                    fmt.writeln(&format!(
                         "{} {} = ((*{}){}.ptr)[i];",
                         format_ty(ty),
                         bound,
                         format_ty(ty),
                         name
-                    );
+                    ));
                 }
-
                 for item in body {
-                    genc_item(item, ind + 1, vars);
+                    genc_item(fmt, item, vars);
                 }
-                indent(ind);
-                println!("}}");
+                fmt.unshift();
+                fmt.writeln("}");
             }
             _ => unimplemented!(),
         },
         Item::Break => {}
         Item::Yield(_) => {}
         Item::Return(expr) => {
-            indent(ind);
-            println!("return {};", format_expr(expr));
+            fmt.writeln(&format!("return {};", format_expr(expr)));
         }
         Item::Expr { expr } => {
-            indent(ind);
-            println!("{};", format_expr(expr));
+            fmt.writeln(&format!("{};", format_expr(expr)));
         }
     }
 }
@@ -250,8 +297,4 @@ fn format_expr(ty: &Expression) -> Cow<str> {
         Expression::Tuple(_) => Cow::Borrowed("/* generated */"),
         Expression::Bool(value) => Cow::Borrowed(if *value { "true" } else { "false" }),
     }
-}
-
-fn indent(n: usize) {
-    print!("{:width$}", "", width = n * 2);
 }
