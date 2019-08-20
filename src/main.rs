@@ -1,14 +1,15 @@
+mod ast;
+mod codegen;
 mod lexer;
 mod parser;
-mod codegen;
 
-use lexer::{Lexer, Token, TokenType, Keyword, PunctKind};
-use parser::{Parser, Item, Ty};
+use lexer::{Keyword, Lexer, PunctKind, Token, TokenType};
+use parser::Parser;
 
 fn main() {
+    use std::fs::File;
     use std::io::prelude::*;
     use std::io::BufReader;
-    use std::fs::File;
 
     for entry in std::fs::read_dir("tests").unwrap() {
         let entry = entry.unwrap();
@@ -21,7 +22,7 @@ fn main() {
         let mut parser = Parser::new(&mut lex);
         match parser.parse() {
             Ok(k) => {
-//            println!("{:#?}", k);
+                //            println!("{:#?}", k);
                 codegen::genc(&k, 0);
             }
             Err(e) => println!("{:?}", e),

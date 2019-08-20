@@ -1,5 +1,5 @@
-use std::str::CharIndices;
 use std::fmt;
+use std::str::CharIndices;
 
 /// Macro used to generate Keyword enum based on collection of string slices
 macro_rules! keywords {
@@ -10,7 +10,7 @@ macro_rules! keywords {
         impl fmt::Debug for Keyword {
             fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
                 match self {
-                    $(&Keyword::$name => write!(f, $val)?),*
+                    $(Keyword::$name => write!(f, $val)?),*
                 }
                 Ok(())
             }
@@ -26,7 +26,6 @@ macro_rules! count_idents {
     ($ident:ident $(,$rest:ident)*) => {1 + count_idents!($($rest),*)};
 }
 
-/// Registration of keywords supported by language
 keywords! {
     "let" => Let,
     "if" => If,
@@ -57,8 +56,8 @@ pub enum TokenValue {
     None,
     Punct(char, PunctKind),
     Identifier,
-    IntegralNumber(i32),
-    FloatingNumber(f32),
+    IntegralNumber(i64),
+    FloatingNumber(f64),
     String(String),
     Keyword(Keyword),
 }
@@ -133,23 +132,23 @@ impl<'a> Token<'a> {
     pub fn get_punct(&self) -> Option<(char, PunctKind)> {
         match self.value {
             TokenValue::Punct(ch, kind) => Some((ch, kind)),
-            _ => None
+            _ => None,
         }
     }
 
     /// Returns the integral number when token is a integer literal
-    pub fn get_integer(&self) -> Option<i32> {
+    pub fn get_integer(&self) -> Option<i64> {
         match self.value {
             TokenValue::IntegralNumber(val) => Some(val),
-            _ => None
+            _ => None,
         }
     }
 
     /// Returns the float number when token is a float literal
-    pub fn get_float(&self) -> Option<f32> {
+    pub fn get_float(&self) -> Option<f64> {
         match self.value {
             TokenValue::FloatingNumber(val) => Some(val),
-            _ => None
+            _ => None,
         }
     }
 
@@ -233,6 +232,7 @@ impl<'a> SourceSpan<'a> {
     }
 
     /// Returns span created from a str
+    #[allow(unused)]
     pub fn from_str(str: &'a str, line: usize, column: usize) -> SourceSpan<'a> {
         SourceSpan {
             source: str,
@@ -258,7 +258,11 @@ impl<'a> PartialEq for SourceSpan<'a> {
 
 impl<'a> fmt::Debug for SourceSpan<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", &self.source[self.start..self.start + self.length])?;
+        write!(
+            f,
+            "{:?}",
+            &self.source[self.start..self.start + self.length]
+        )?;
         Ok(())
     }
 }
@@ -270,7 +274,6 @@ pub enum LexerError {
 }
 
 pub type LexerResult<T> = Result<T, LexerError>;
-
 
 /// Handle for a new source span
 struct SourceSpanHandle {
@@ -405,7 +408,11 @@ impl<'a> Lexer<'a> {
             .peek(0)
             .map(|c| c.is_ascii_punctuation())
             .unwrap_or(false);
-        let kind = if is_joint { PunctKind::Joint } else { PunctKind::Single };
+        let kind = if is_joint {
+            PunctKind::Joint
+        } else {
+            PunctKind::Single
+        };
 
         Ok(Token {
             value: TokenValue::Punct(first, kind),
@@ -435,7 +442,7 @@ impl<'a> Lexer<'a> {
                 self.advance().unwrap();
                 true
             }
-            _ => false
+            _ => false,
         };
         if has_exponent {
             match self.peek(0) {
@@ -450,10 +457,10 @@ impl<'a> Lexer<'a> {
 
         let span = handle.get_span(self);
         let value = if is_floating {
-            let parsed = span.as_slice().parse::<f32>().unwrap();
+            let parsed = span.as_slice().parse().expect("valid float");
             TokenValue::FloatingNumber(parsed)
         } else {
-            let parsed = span.as_slice().parse::<i32>().unwrap();
+            let parsed = span.as_slice().parse().expect("valid integer");
             TokenValue::IntegralNumber(parsed)
         };
 
@@ -538,7 +545,7 @@ impl<'a> Lexer<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Lexer, LexerError, Token, SourceSpan, TokenType, TokenValue, Keyword, PunctKind};
+    use super::{Keyword, Lexer, LexerError, SourceSpan, Token, TokenType, TokenValue};
 
     macro_rules! assert_token_type_eq {
         ($actual:expr, $expected:expr, $line:expr, $column:expr) => {
@@ -547,20 +554,24 @@ mod tests {
             assert_eq!(token.map(|t| t.get_type()), Ok($expected), "token type");
             assert_eq!(token.map(|t| t.line()), Ok($line), "line number");
             assert_eq!(token.map(|t| t.column()), Ok($column), "column number");
-        }
+        };
     }
 
     macro_rules! assert_token_eq {
         ($actual:expr, $value:expr, $span:expr, $line:expr, $column:expr) => {
             let token = $actual;
             let token = token.as_ref();
-            assert_eq!(token, Ok(&Token{
-                value: $value,
-                span: SourceSpan::from_str($span, $line, $column),
-            }), "token value");
+            assert_eq!(
+                token,
+                Ok(&Token {
+                    value: $value,
+                    span: SourceSpan::from_str($span, $line, $column),
+                }),
+                "token value"
+            );
             assert_eq!(token.map(|t| t.line()), Ok($line), "line number");
             assert_eq!(token.map(|t| t.column()), Ok($column), "column number");
-        }
+        };
     }
 
     #[test]

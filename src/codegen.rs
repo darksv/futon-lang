@@ -1,16 +1,17 @@
-use parser::{Item, Ty, Expression};
-use std::borrow::{Cow, Borrow};
+use ast::{Expression, Item};
 use lexer::TokenType;
+use parser::Ty;
+use std::borrow::{Borrow, Cow};
 use std::collections::HashMap;
 
 struct VariableHolder {
-    variables: HashMap<String, Vec<(Ty, Option<Expression>)>>
+    variables: HashMap<String, Vec<(Ty, Option<Expression>)>>,
 }
 
 impl VariableHolder {
     fn new() -> Self {
         VariableHolder {
-            variables: Default::default()
+            variables: Default::default(),
         }
     }
 
@@ -21,6 +22,7 @@ impl VariableHolder {
             .push((ty.clone(), val.clone()));
     }
 
+    #[allow(unused)]
     fn undef<T: Into<String> + Borrow<str>>(&mut self, name: T) -> bool {
         if let Some(x) = self.variables.get_mut(name.borrow()) {
             x.pop().is_some()
@@ -49,10 +51,19 @@ fn genc_item(item: &Item, ind: usize, vars: &mut VariableHolder) {
     match item {
         Item::Let { name, ty, expr, .. } => {
             indent(ind);
-            println!("{} {} = {};", format_ty(ty.as_ref().unwrap()), name, format_expr(expr.as_ref().unwrap()));
+            println!(
+                "{} {} = {};",
+                format_ty(ty.as_ref().unwrap()),
+                name,
+                format_expr(expr.as_ref().unwrap())
+            );
             vars.def(name.clone(), ty.clone().unwrap(), expr.clone());
         }
-        Item::Assignment { lhs, operator, expr } => {
+        Item::Assignment {
+            lhs,
+            operator,
+            expr,
+        } => {
             indent(ind);
             if let Some(op) = operator {
                 println!("{} {}= {};", format_expr(lhs), op, format_expr(expr));
@@ -60,7 +71,13 @@ fn genc_item(item: &Item, ind: usize, vars: &mut VariableHolder) {
                 println!("{} = {};", format_expr(lhs), format_expr(expr));
             }
         }
-        Item::Function { name, args, ty, body, .. } => {
+        Item::Function {
+            name,
+            args,
+            ty,
+            body,
+            ..
+        } => {
             indent(ind);
             print!("{} {}(", format_ty(ty.as_ref().unwrap()), name);
             if args.is_empty() {
@@ -83,7 +100,11 @@ fn genc_item(item: &Item, ind: usize, vars: &mut VariableHolder) {
             indent(ind);
             println!("}}");
         }
-        Item::If { condition, arm_true, arm_false } => {
+        Item::If {
+            condition,
+            arm_true,
+            arm_false,
+        } => {
             indent(ind);
             println!("if ({}) {{", format_expr(condition));
             for item in arm_true {
@@ -99,41 +120,49 @@ fn genc_item(item: &Item, ind: usize, vars: &mut VariableHolder) {
             indent(ind);
             println!("}}");
         }
-        Item::ForIn { name: bound, expr, body } => {
-            match expr {
-                Expression::Identifier(name) => {
-                    let (ty, expr) = vars.get(name.clone()).expect(&name);
-                    let (n, ty) = match ty {
-                        Ty::Array(n, ty) => (Some(n), &**ty),
-                        Ty::Slice(ty) => (None, &**ty),
-                        Ty::U32 => (Some(&10), ty),
-                        other => {
-                            dbg!(other);
-                            unimplemented!()
-                        }
-                    };
-
-                    if let Some(n) = n {
-                        indent(ind);
-                        println!("for (int64_t i = 0; i < {}; ++i) {{", n);
-                        indent(ind + 1);
-                        println!("{} {} = {}[i];", format_ty(ty), bound, name);
-                    } else {
-                        indent(ind);
-                        println!("for (int64_t i = 0; i < {}.len; ++i) {{", name);
-                        indent(ind + 1);
-                        println!("{} {} = ((*{}){}.ptr)[i];", format_ty(ty), bound, format_ty(ty), name);
+        Item::ForIn {
+            name: bound,
+            expr,
+            body,
+        } => match expr {
+            Expression::Identifier(name) => {
+                let (ty, _expr) = vars.get(name.clone()).expect(&name);
+                let (n, ty) = match ty {
+                    Ty::Array(n, ty) => (Some(n), &**ty),
+                    Ty::Slice(ty) => (None, &**ty),
+                    Ty::U32 => (Some(&10), ty),
+                    other => {
+                        dbg!(other);
+                        unimplemented!()
                     }
+                };
 
-                    for item in body {
-                        genc_item(item, ind + 1, vars);
-                    }
+                if let Some(n) = n {
                     indent(ind);
-                    println!("}}");
+                    println!("for (int64_t i = 0; i < {}; ++i) {{", n);
+                    indent(ind + 1);
+                    println!("{} {} = {}[i];", format_ty(ty), bound, name);
+                } else {
+                    indent(ind);
+                    println!("for (int64_t i = 0; i < {}.len; ++i) {{", name);
+                    indent(ind + 1);
+                    println!(
+                        "{} {} = ((*{}){}.ptr)[i];",
+                        format_ty(ty),
+                        bound,
+                        format_ty(ty),
+                        name
+                    );
                 }
-                _ => unimplemented!()
+
+                for item in body {
+                    genc_item(item, ind + 1, vars);
+                }
+                indent(ind);
+                println!("}}");
             }
-        }
+            _ => unimplemented!(),
+        },
         Item::Break => {}
         Item::Yield(_) => {}
         Item::Return(expr) => {
@@ -148,8 +177,8 @@ fn format_ty(ty: &Ty) -> Cow<'static, str> {
         Ty::U32 => Cow::Borrowed("uint32_t"),
         Ty::I32 => Cow::Borrowed("int32_t"),
         Ty::Array(len, ty) => Cow::Owned(format!("{}[{}]", format_ty(&**ty), len)),
-        Ty::Slice(ty) => Cow::Owned(format!("Slice")),
-        Ty::UserDefined(_) => Cow::Borrowed("/* generated */"),
+        Ty::Slice(_ty) => Cow::Owned(format!("Slice")),
+        Ty::Other(_) => Cow::Borrowed("/* generated */"),
         Ty::Tuple(tys) => {
             if tys.is_empty() {
                 Cow::Borrowed("void")
@@ -158,7 +187,7 @@ fn format_ty(ty: &Ty) -> Cow<'static, str> {
             }
         }
         Ty::Function(..) => Cow::Borrowed("void*"),
-        Ty::Ptr(inner) => Cow::Owned(format!("{}*", format_ty(&**inner))),
+        Ty::Pointer(inner) => Cow::Owned(format!("{}*", format_ty(&**inner))),
         Ty::Bool => Cow::Borrowed("bool"),
     }
 }
@@ -166,27 +195,24 @@ fn format_ty(ty: &Ty) -> Cow<'static, str> {
 fn format_operator(op: &TokenType) -> Cow<'static, str> {
     match op {
         TokenType::Punct(c) => Cow::Owned(c.to_string()),
-        _ => Cow::Borrowed("")
+        _ => Cow::Borrowed(""),
     }
 }
 
 fn format_expr(ty: &Expression) -> Cow<str> {
     match ty {
-        Expression::Identifier(x) => {
-            Cow::Borrowed(x.as_str())
+        Expression::Identifier(x) => Cow::Borrowed(x.as_str()),
+        Expression::Integer(value) => Cow::Owned(value.to_string()),
+        Expression::Float(value) => Cow::Owned(value.to_string()),
+        Expression::Prefix(op, expr) => {
+            Cow::Owned(format!("{}{}", format_operator(op), format_expr(&**expr)))
         }
-        Expression::IntegralConstant(x) => {
-            Cow::Owned(x.to_string())
-        }
-        Expression::FloatingConstant(x) => {
-            Cow::Owned(x.to_string())
-        }
-        Expression::Prefix(x, expr) => {
-            Cow::Owned(format!("{}{}", format_operator(x), format_expr(&**expr)))
-        }
-        Expression::Infix(x, lhs, rhs) => {
-            Cow::Owned(format!("({} {} {})", format_expr(&**lhs), format_operator(x), format_expr(&**rhs)))
-        }
+        Expression::Infix(op, lhs, rhs) => Cow::Owned(format!(
+            "({} {} {})",
+            format_expr(&**lhs),
+            format_operator(op),
+            format_expr(&**rhs)
+        )),
         Expression::Array(values) => {
             let mut s = String::new();
             s.push('{');
@@ -210,16 +236,8 @@ fn format_expr(ty: &Expression) -> Cow<str> {
 
             Cow::Owned(s)
         }
-        Expression::Tuple(_) => {
-            Cow::Borrowed("/* generated */")
-        }
-        Expression::BoolConstant(x) => {
-            Cow::Borrowed(if *x {
-                "true"
-            } else {
-                "false"
-            })
-        }
+        Expression::Tuple(_) => Cow::Borrowed("/* generated */"),
+        Expression::Bool(value) => Cow::Borrowed(if *value { "true" } else { "false" }),
     }
 }
 
