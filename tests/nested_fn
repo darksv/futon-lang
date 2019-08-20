@@ -1,0 +1,7 @@
+fn foo() -> () {
+    fn bar() -> () {
+        fn baz() -> u32 {
+            return 32;
+        }
+    }
+}

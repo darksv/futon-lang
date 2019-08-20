@@ -1,0 +1,5 @@
+fn apply_for_each(arr: []i32, a: fn(i32) -> i32) -> (u32, u32) {
+    for item in arr {
+        item = a(item);
+    }
+}

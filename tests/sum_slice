@@ -1,0 +1,13 @@
+fn sum(items: []i32) -> i32 {
+    let acc: i32 = 0;
+    for item in items {
+        if item > 10 {
+            acc += item;
+        }
+    }
+    return acc;
+}
+
+fn sum_arr(items: [3]i32) -> i32 {
+    return sum(items);
+}

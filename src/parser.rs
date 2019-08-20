@@ -19,7 +19,7 @@ impl<'a> MultiPeek<'a> {
             peeked: [None, None],
             index: 0,
             length: 0,
-            lex
+            lex,
         }
     }
 
@@ -49,6 +49,8 @@ impl<'a> MultiPeek<'a> {
 
 pub enum ParseError {
     UnexpectedToken(TokenType, usize, usize, Option<TokenType>),
+    Expr,
+    Other,
 }
 
 impl fmt::Debug for ParseError {
@@ -60,6 +62,12 @@ impl fmt::Debug for ParseError {
             &ParseError::UnexpectedToken(actual, line, column, Some(expected)) => {
                 write!(f, "Unexpected {:?} at {}:{}, expected {:?}", actual, line, column, expected)?
             }
+            &ParseError::Other => {
+                write!(f, "other")?
+            }
+            &ParseError::Expr => {
+                write!(f, "expr")?
+            }
         }
         Ok(())
     }
@@ -67,23 +75,40 @@ impl fmt::Debug for ParseError {
 
 #[derive(Debug)]
 pub struct Argument {
-    name: String,
-    ty: String,
+    pub name: String,
+    pub ty: Ty,
 }
 
 #[derive(Debug)]
+#[derive(Clone)]
 pub enum Expression {
     Identifier(String),
     IntegralConstant(i32),
     FloatingConstant(f32),
+    BoolConstant(bool),
+    Prefix(TokenType, Box<Expression>),
+    Infix(TokenType, Box<Expression>, Box<Expression>),
+    Array(Vec<Expression>),
+    Tuple(Vec<Expression>),
+    Call(Box<Expression>, Vec<Expression>),
 }
 
 #[derive(Debug)]
 pub enum Item {
+    Let {
+        name: String,
+        ty: Option<Ty>,
+        expr: Option<Expression>,
+    },
+    Assignment {
+        lhs: Expression,
+        operator: Option<char>,
+        expr: Expression,
+    },
     Function {
         name: String,
         args: Vec<Argument>,
-        ty: Option<String>,
+        ty: Option<Ty>,
         body: Vec<Item>,
     },
     If {
@@ -101,6 +126,20 @@ pub enum Item {
     Return(Box<Expression>),
 }
 
+#[derive(Debug)]
+#[derive(Clone)]
+pub enum Ty {
+    Bool,
+    U32,
+    I32,
+    Array(usize, Box<Ty>),
+    Slice(Box<Ty>),
+    Tuple(Vec<Ty>),
+    Function(Vec<Ty>, Box<Ty>),
+    Ptr(Box<Ty>),
+    UserDefined(String),
+}
+
 type ParseResult<T> = Result<T, ParseError>;
 
 impl<'a> Parser<'a> {
@@ -115,7 +154,7 @@ impl<'a> Parser<'a> {
         loop {
             let token = self.peek(0);
             let item = match token.get_type() {
-                TokenType::Keyword(Keyword::Func) => self.parse_func(),
+                TokenType::Keyword(Keyword::Fn) => self.parse_fn(),
                 TokenType::EndOfSource => break,
                 token_type => unimplemented!("{:?}", token_type),
             };
@@ -129,14 +168,33 @@ impl<'a> Parser<'a> {
         loop {
             let token = self.peek(0);
             let item = match token.get_type() {
+                TokenType::Keyword(Keyword::Let) => self.parse_let(),
                 TokenType::Keyword(Keyword::For) => self.parse_for(),
-                TokenType::Keyword(Keyword::Func) => self.parse_func(),
+                TokenType::Keyword(Keyword::Fn) => self.parse_fn(),
                 TokenType::Keyword(Keyword::If) => self.parse_if(),
                 TokenType::Keyword(Keyword::Yield) => self.parse_yield(),
                 TokenType::Keyword(Keyword::Return) => self.parse_return(),
                 TokenType::Keyword(Keyword::Break) => {
                     self.advance();
                     Ok(Item::Break)
+                }
+                TokenType::Punct('*') => {
+                    let lhs = self.parse_expr_opt(0)?.expect("xd");
+                    let item = if let Some(item) = self.parse_assign_opt(lhs)? {
+                        item
+                    } else {
+                        break;
+                    };
+                    Ok(item)
+                }
+                TokenType::Identifier => {
+                    let lhs = self.parse_expr_opt(0)?.unwrap_or_else(|| Expression::Identifier(token.as_string()));
+                    let item = if let Some(item) = self.parse_assign_opt(lhs)? {
+                        item
+                    } else {
+                        break;
+                    };
+                    Ok(item)
                 }
                 _ => break,
             };
@@ -145,37 +203,170 @@ impl<'a> Parser<'a> {
         Ok(items)
     }
 
-    fn parse_expr(&mut self) -> ParseResult<Expression> {
+    fn parse_assign_opt(&mut self, lhs: Expression) -> ParseResult<Option<Item>> {
+        let item = if self.match_many(&['+', '=']) {
+            Item::Assignment {
+                lhs,
+                operator: Some('+'),
+                expr: self.parse_expr(0)?,
+            }
+        } else if self.match_one('=') {
+            Item::Assignment {
+                lhs,
+                operator: None,
+                expr: self.parse_expr(0)?,
+            }
+        } else {
+            self.expect_one(';')?;
+            return Ok(None);
+        };
+        self.expect_one(';')?;
+        Ok(Some(item))
+    }
+
+    fn parse_expr(&mut self, precedence: isize) -> ParseResult<Expression> {
+        Ok(self.parse_expr_opt(precedence)?.expect("a"))
+    }
+
+    fn parse_expr_opt(&mut self, precedence: isize) -> ParseResult<Option<Expression>> {
         let token = self.peek(0);
-        let expr = match (token.get_type(), token) {
-            (TokenType::IntegralNumber, token) => {
+        let lhs = match token.get_type() {
+            TokenType::Punct('-')
+            | TokenType::Punct('*') => {
                 self.advance();
-                Expression::IntegralConstant(token.get_integer().unwrap())
+                let operand = self.parse_expr(10)?;
+                Expression::Prefix(token.get_type(), Box::new(operand))
             }
-            (TokenType::FloatingNumber, token) => {
-                self.advance();
-                Expression::FloatingConstant(token.get_float().unwrap())
-            }
-            (TokenType::Identifier, token) => {
+            TokenType::Identifier => {
                 self.advance();
                 Expression::Identifier(token.as_string())
             }
-            _ => unimplemented!(),
+            TokenType::IntegralNumber => {
+                self.advance();
+                Expression::IntegralConstant(token.get_integer().unwrap())
+            }
+            TokenType::FloatingNumber => {
+                self.advance();
+                Expression::FloatingConstant(token.get_float().unwrap())
+            }
+            TokenType::Keyword(Keyword::True) => {
+                self.advance();
+                Expression::BoolConstant(true)
+            }
+            TokenType::Keyword(Keyword::False) => {
+                self.advance();
+                Expression::BoolConstant(false)
+            }
+            TokenType::Punct('(') => {
+                self.advance();
+                let mut expr = None;
+                let mut values = vec![];
+                loop {
+                    let value = self.parse_expr(0)?;
+                    if let Some(expr) = expr.take() {
+                        values = vec![expr, value];
+                    } else {
+                        expr = Some(value);
+                    }
+
+                    if !self.match_one(',') {
+                        break;
+                    }
+                }
+                self.expect_one(')')?;
+
+                if let Some(expr) = expr {
+                    expr
+                } else {
+                    Expression::Tuple(values)
+                }
+            }
+            TokenType::Punct('[') => {
+                self.advance();
+                let mut values = vec![];
+                loop {
+                    if self.match_one(']') {
+                        break;
+                    }
+                    values.push(self.parse_expr(0)?);
+                    self.match_one(',');
+                }
+                Expression::Array(values)
+            }
+            other => {
+                return Ok(None);
+            }
         };
-        Ok(expr)
+
+        let mut expr = lhs;
+        loop {
+            let token = self.peek(0);
+
+            let new_precedence = Self::get_precedence(&token);
+            if new_precedence < precedence || new_precedence == precedence && Self::is_left_associative(&token) {
+                break;
+            }
+
+            expr = match token.get_type() {
+                TokenType::Punct('+')
+                | TokenType::Punct('-')
+                | TokenType::Punct('*')
+                | TokenType::Punct('/') => {
+                    if self.peek(1).get_type() == TokenType::Punct('=') {
+                        break;
+                    }
+
+                    let op = self.advance();
+                    let rhs = self.parse_expr(new_precedence)?;
+                    Expression::Infix(op.get_type(), Box::new(expr), Box::new(rhs))
+                }
+                TokenType::Punct('<')
+                | TokenType::Punct('>') => {
+                    let op = self.advance();
+                    let rhs = self.parse_expr(new_precedence)?;
+                    Expression::Infix(op.get_type(), Box::new(expr), Box::new(rhs))
+                }
+                TokenType::Punct('(') => {
+                    self.advance();
+                    let arg = self.parse_expr(0)?;
+                    self.expect_one(')')?;
+                    Expression::Call(Box::new(expr), vec![arg])
+                }
+                other => break,
+            };
+        }
+
+        Ok(Some(expr))
     }
 
-    fn parse_func(&mut self) -> ParseResult<Item> {
-        self.expect_keyword(Keyword::Func)?;
+    fn get_precedence(token: &Token) -> isize {
+        match token.get_type() {
+            TokenType::Punct('+') => 1,
+            TokenType::Punct('-') => 1,
+            TokenType::Punct('*') => 2,
+            TokenType::Punct('/') => 2,
+            _ => 0,
+        }
+    }
+
+    fn is_left_associative(token: &Token) -> bool {
+        match token.get_type() {
+            TokenType::Punct('-') => true,
+            _ => false,
+        }
+    }
+
+    fn parse_fn(&mut self) -> ParseResult<Item> {
+        self.expect_keyword(Keyword::Fn)?;
         let identifier = self.expect_identifier()?.as_string();
         self.expect_one('(')?;
         let mut args = vec![];
         while let Some(t) = self.match_identifier() {
             self.expect_one(':')?;
-            let ty = self.expect_identifier()?;
+            let ty = self.parse_ty()?;
             args.push(Argument {
                 name: t.as_string(),
-                ty: ty.as_string()
+                ty,
             });
             if !self.match_one(',') {
                 break;
@@ -184,7 +375,7 @@ impl<'a> Parser<'a> {
         self.expect_one(')')?;
 
         let ty = if self.match_many(&['-', '>']) {
-            Some(self.expect_identifier()?.as_string())
+            Some(self.parse_ty()?)
         } else {
             None
         };
@@ -195,11 +386,102 @@ impl<'a> Parser<'a> {
         Ok(Item::Function { name: identifier, args, body, ty })
     }
 
+    fn parse_let(&mut self) -> ParseResult<Item> {
+        self.expect_keyword(Keyword::Let)?;
+        let identifier = self.expect_identifier()?.as_string();
+        let ty = if self.match_one(':') {
+            Some(self.parse_ty()?)
+        } else {
+            None
+        };
+
+        let expr = if self.match_one('=') {
+            Some(self.parse_expr(0)?)
+        } else {
+            None
+        };
+
+        self.expect_one(';')?;
+
+        Ok(Item::Let {
+            name: identifier,
+            ty,
+            expr,
+        })
+    }
+
+    fn parse_ty(&mut self) -> ParseResult<Ty> {
+        let token = self.advance();
+        match token.get_type() {
+            TokenType::Punct('[') => {
+                let token = self.peek(0);
+                let length = match token.get_type() {
+                    TokenType::IntegralNumber => {
+                        let length = token.get_integer().unwrap() as usize;
+                        self.advance();
+                        Some(length)
+                    }
+                    _ => None
+                };
+                self.expect_one(']')?;
+                let ty = self.parse_ty()?;
+                if let Some(length) = length {
+                    Ok(Ty::Array(length, Box::new(ty)))
+                } else {
+                    Ok(Ty::Slice(Box::new(ty)))
+                }
+            }
+            TokenType::Punct('*') => {
+                Ok(Ty::Ptr(Box::new(self.parse_ty()?)))
+            }
+            TokenType::Identifier => {
+                Ok(match token.as_slice() {
+                    "bool" => Ty::Bool,
+                    "i32" => Ty::I32,
+                    "u32" => Ty::U32,
+                    ud => Ty::UserDefined(ud.to_string()),
+                })
+            }
+            TokenType::Keyword(Keyword::Fn) => {
+                self.expect_one('(')?;
+                let args = self.parse_tuple()?;
+
+                let ret = if self.match_many(&['-', '>']) {
+                    self.parse_ty()?
+                } else {
+                    Ty::Tuple(vec![])
+                };
+
+                Ok(Ty::Function(args, Box::new(ret)))
+            }
+            TokenType::Punct('(') => {
+                let types = self.parse_tuple()?;
+                Ok(Ty::Tuple(types))
+            }
+            _ => unimplemented!()
+        }
+    }
+
+    fn parse_tuple(&mut self) -> ParseResult<Vec<Ty>> {
+        let mut args = vec![];
+        loop {
+            if self.match_one(')') {
+                break;
+            }
+            args.push(self.parse_ty()?);
+            if !self.match_one(',') {
+                self.expect_one(')')?;
+                break;
+            }
+        }
+        Ok(args)
+    }
+
     fn parse_for(&mut self) -> ParseResult<Item> {
         self.expect_keyword(Keyword::For)?;
         let identifier = self.expect_identifier()?.as_string();
         self.expect_keyword(Keyword::In)?;
-        let expr = self.parse_expr()?;
+        let expr = self.parse_expr(0)?;
         self.expect_one('{')?;
         let items = self.parse_stmts()?;
         self.expect_one('}')?;
@@ -208,7 +490,7 @@ impl<'a> Parser<'a> {
 
     fn parse_if(&mut self) -> ParseResult<Item> {
         self.expect_keyword(Keyword::If)?;
-        let condition = self.parse_expr()?;
+        let condition = self.parse_expr(0)?;
         self.expect_one('{')?;
         let arm_true = self.parse_stmts()?;
         self.expect_one('}')?;
@@ -225,13 +507,14 @@ impl<'a> Parser<'a> {
 
     fn parse_yield(&mut self) -> ParseResult<Item> {
         self.expect_keyword(Keyword::Yield)?;
-        let value = self.parse_expr()?;
+        let value = self.parse_expr(0)?;
         Ok(Item::Yield(Box::new(value)))
     }
 
     fn parse_return(&mut self) -> ParseResult<Item> {
         self.expect_keyword(Keyword::Return)?;
-        let value = self.parse_expr()?;
+        let value = self.parse_expr(0)?;
+        self.expect_one(';')?;
         Ok(Item::Return(Box::new(value)))
     }
 
@@ -277,7 +560,7 @@ impl<'a> Parser<'a> {
     fn expect_one(&mut self, ch: char) -> ParseResult<()> {
         match self.expect_punct(PunctKind::Single, ch) {
             Ok(_) => Ok(()),
-            Err(_) =>  self.expect_punct(PunctKind::Joint, ch)
+            Err(_) => self.expect_punct(PunctKind::Joint, ch)
         }
     }
 
@@ -295,7 +578,7 @@ impl<'a> Parser<'a> {
                     if idx == chars.len() - 1 || kind == PunctKind::Joint {
                         self.advance();
                     }
-                },
+                }
                 _ => {
                     return Err(self.expected(TokenType::Punct(expected)));
                 }

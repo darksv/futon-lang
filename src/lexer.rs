@@ -28,12 +28,13 @@ macro_rules! count_idents {
 
 /// Registration of keywords supported by language
 keywords! {
+    "let" => Let,
     "if" => If,
     "else" => Else,
     "for" => For,
     "while" => While,
     "loop" => Loop,
-    "func" => Func,
+    "fn" => Fn,
     "yield" => Yield,
     "return" => Return,
     "break" => Break,
@@ -462,7 +463,7 @@ impl<'a> Lexer<'a> {
     fn advance_while_digits(&mut self) {
         loop {
             match self.peek(0) {
-                Some('0'...'9') | Some('_') => self.advance().unwrap(),
+                Some('0'..='9') | Some('_') => self.advance().unwrap(),
                 _ => break,
             };
         }
