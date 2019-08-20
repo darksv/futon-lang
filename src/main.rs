@@ -22,6 +22,7 @@ fn main() {
         let mut parser = Parser::new(&mut lex);
         match parser.parse() {
             Ok(k) => {
+                println!("// {}", entry.path().to_str().unwrap());
                 //            println!("{:#?}", k);
                 codegen::genc(&k, 0);
             }

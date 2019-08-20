@@ -88,7 +88,9 @@ fn genc_item(item: &Item, ind: usize, vars: &mut VariableHolder) {
                     if i != args.len() - 1 {
                         print!(", ")
                     }
+                }
 
+                for arg in args {
                     vars.def(arg.name.clone(), arg.ty.clone(), None);
                 }
             }
@@ -169,6 +171,10 @@ fn genc_item(item: &Item, ind: usize, vars: &mut VariableHolder) {
             indent(ind);
             println!("return {};", format_expr(expr));
         }
+        Item::Expr { expr } => {
+            indent(ind);
+            println!("{};", format_expr(expr));
+        }
     }
 }
 
@@ -231,7 +237,12 @@ fn format_expr(ty: &Expression) -> Cow<str> {
             s.push_str(&format_expr(expr));
             s.push(')');
             s.push('(');
-            s.push_str(&format_expr(&args[0]));
+            for (i, arg) in args.iter().enumerate() {
+                s.push_str(&*format_expr(arg));
+                if i != args.len() - 1 {
+                    s.push_str(", ");
+                }
+            }
             s.push(')');
 
             Cow::Owned(s)

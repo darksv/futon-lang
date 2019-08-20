@@ -32,6 +32,9 @@ pub enum Item {
         operator: Option<char>,
         expr: Expression,
     },
+    Expr {
+        expr: Expression,
+    },
     Function {
         name: String,
         args: Vec<Argument>,

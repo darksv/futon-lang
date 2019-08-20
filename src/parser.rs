@@ -126,21 +126,13 @@ impl<'a> Parser<'a> {
                     let lhs = self
                         .parse_expr_opt(0)?
                         .ok_or(ParseError::Custom("expected expression"))?;
-                    let item = match self.parse_assign_opt(lhs)? {
-                        Some(item) => item,
-                        None => break,
-                    };
-                    Ok(item)
+                    self.parse_assign_or_expr(lhs)
                 }
                 TokenType::Identifier => {
                     let lhs = self
                         .parse_expr_opt(0)?
                         .unwrap_or_else(|| Expression::Identifier(token.as_string()));
-                    let item = match self.parse_assign_opt(lhs)? {
-                        Some(item) => item,
-                        None => break,
-                    };
-                    Ok(item)
+                    self.parse_assign_or_expr(lhs)
                 }
                 _ => break,
             };
@@ -149,7 +141,7 @@ impl<'a> Parser<'a> {
         Ok(items)
     }
 
-    fn parse_assign_opt(&mut self, lhs: Expression) -> ParseResult<Option<Item>> {
+    fn parse_assign_or_expr(&mut self, lhs: Expression) -> ParseResult<Item> {
         let item = if self.match_many(&['+', '=']) {
             Item::Assignment {
                 lhs,
@@ -163,11 +155,12 @@ impl<'a> Parser<'a> {
                 expr: self.parse_expr(0)?,
             }
         } else {
-            self.expect_one(';')?;
-            return Ok(None);
+            Item::Expr {
+                expr: lhs
+            }
         };
         self.expect_one(';')?;
-        Ok(Some(item))
+        Ok(item)
     }
 
     fn parse_expr(&mut self, precedence: isize) -> ParseResult<Expression> {
@@ -206,25 +199,12 @@ impl<'a> Parser<'a> {
             }
             TokenType::Punct('(') => {
                 self.advance();
-                let mut expr = None;
-                let mut values = vec![];
-                loop {
-                    let value = self.parse_expr(0)?;
-                    match expr.take() {
-                        Some(expr) => {
-                            values = vec![expr, value];
-                        }
-                        None => {
-                            expr = Some(value);
-                        }
-                    }
-
-                    if !self.match_one(',') {
-                        break;
-                    }
-                }
+                let values = self.parse_comma_separated_exprs()?;
                 self.expect_one(')')?;
-                expr.unwrap_or(Expression::Tuple(values))
+                match values.len() {
+                    1 => values.into_iter().next().unwrap(),
+                    _ => Expression::Tuple(values)
+                }
             }
             TokenType::Punct('[') => {
                 self.advance();
@@ -274,15 +254,27 @@ impl<'a> Parser<'a> {
                 }
                 TokenType::Punct('(') => {
                     self.advance();
-                    let arg = self.parse_expr(0)?;
+                    let args = self.parse_comma_separated_exprs()?;
                     self.expect_one(')')?;
-                    Expression::Call(Box::new(expr), vec![arg])
+                    Expression::Call(Box::new(expr), args)
                 }
-                _other => break,
+                _ => break,
             };
         }
 
         Ok(Some(expr))
+    }
+
+    fn parse_comma_separated_exprs(&mut self) -> ParseResult<Vec<Expression>> {
+        let mut values = vec![];
+        loop {
+            let value = self.parse_expr(0)?;
+            values.push(value);
+            if !self.match_one(',') {
+                break;
+            }
+        }
+        Ok(values)
     }
 
     fn get_precedence(token: &Token) -> isize {
