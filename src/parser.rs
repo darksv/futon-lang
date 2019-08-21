@@ -78,12 +78,12 @@ pub enum TyS<'t> {
     Bool,
     U32,
     I32,
-    Array(usize, &'t TyS<'t>),
-    Slice(&'t TyS<'t>),
+    Array(usize, Ty<'t>),
+    Slice(Ty<'t>),
     Unit,
-    Tuple(Vec<&'t TyS<'t>>),
-    Function(Vec<&'t TyS<'t>>, &'t TyS<'t>),
-    Pointer(&'t TyS<'t>),
+    Tuple(Vec<Ty<'t>>),
+    Function(Vec<Ty<'t>>, Ty<'t>),
+    Pointer(Ty<'t>),
     Other(String),
 }
 
@@ -391,7 +391,7 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
                 let ret = if self.match_many(&['-', '>']) {
                     self.parse_ty()?
                 } else {
-                    self.ty.alloc(TyS::Unit)
+                    self.make_ty(TyS::Unit)
                 };
 
                 Ok(TyS::Function(args, ret))
@@ -402,7 +402,11 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
             }
             _ => unimplemented!(),
         };
-        ty.map(|ty| &*self.ty.alloc(ty))
+        ty.map(|ty| self.make_ty(ty))
+    }
+
+    fn make_ty(&self, ty: TyS<'tcx>) -> Ty<'tcx> {
+        &*self.ty.alloc(ty)
     }
 
     fn parse_ty_tuple(&mut self) -> ParseResult<Vec<Ty<'tcx>>> {
