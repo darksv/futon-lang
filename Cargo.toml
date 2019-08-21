@@ -4,3 +4,4 @@ version = "0.1.0"
 authors = ["darksv <darek969-12@o2.pl>"]
 
 [dependencies]
+typed-arena = "1.5.0"

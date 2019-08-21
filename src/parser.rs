@@ -1,20 +1,22 @@
 use super::{Keyword, Lexer, PunctKind, Token, TokenType};
 use ast::{Argument, Expression, Item};
 use std::fmt;
+use typed_arena::Arena;
 
-pub struct Parser<'a> {
-    peek: MultiPeek<'a>,
+pub struct Parser<'lex, 'tcx> {
+    peek: MultiPeek<'lex>,
+    ty: &'tcx Arena<Ty<'tcx>>
 }
 
-struct MultiPeek<'a> {
-    peeked: [Option<Token<'a>>; 2],
+struct MultiPeek<'lex> {
+    peeked: [Option<Token<'lex>>; 2],
     index: usize,
     length: usize,
-    lex: &'a mut Lexer<'a>,
+    lex: &'lex mut Lexer<'lex>,
 }
 
-impl<'a> MultiPeek<'a> {
-    fn new(lex: &'a mut Lexer<'a>) -> Self {
+impl<'lex> MultiPeek<'lex> {
+    fn new(lex: &'lex mut Lexer<'lex>) -> Self {
         MultiPeek {
             peeked: [None, None],
             index: 0,
@@ -24,7 +26,7 @@ impl<'a> MultiPeek<'a> {
     }
 
     /// Returns next item without consuming it
-    pub fn peek(&mut self, offset: usize) -> &Token<'a> {
+    pub fn peek(&mut self, offset: usize) -> &Token<'lex> {
         self.ensure_peeked(offset);
         self.peeked[(self.index + offset) % self.peeked.len()]
             .as_ref()
@@ -32,7 +34,7 @@ impl<'a> MultiPeek<'a> {
     }
 
     /// Returns next item and removes it from queue
-    pub fn advance(&mut self) -> Token<'a> {
+    pub fn advance(&mut self) -> Token<'lex> {
         self.ensure_peeked(0);
         let item = self.peeked[self.index].take().unwrap();
         self.length -= 1;
@@ -71,29 +73,31 @@ impl fmt::Debug for ParseError {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum Ty {
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum Ty<'t> {
     Bool,
     U32,
     I32,
-    Array(usize, Box<Ty>),
-    Slice(Box<Ty>),
-    Tuple(Vec<Ty>),
-    Function(Vec<Ty>, Box<Ty>),
-    Pointer(Box<Ty>),
+    Array(usize, &'t Ty<'t>),
+    Slice(&'t Ty<'t>),
+    Unit,
+    Tuple(Vec<&'t Ty<'t>>),
+    Function(Vec<&'t Ty<'t>>, &'t Ty<'t>),
+    Pointer(&'t Ty<'t>),
     Other(String),
 }
 
 type ParseResult<T> = Result<T, ParseError>;
 
-impl<'a> Parser<'a> {
-    pub fn new(lex: &'a mut Lexer<'a>) -> Parser<'a> {
+impl<'lex, 'tcx> Parser<'lex, 'tcx> {
+    pub fn new(lex: &'lex mut Lexer<'lex>, arena: &'tcx Arena<Ty<'tcx>>) -> Parser<'lex, 'tcx> {
         Parser {
             peek: MultiPeek::new(lex),
+            ty: arena
         }
     }
 
-    pub fn parse(&mut self) -> ParseResult<Vec<Item>> {
+    pub fn parse(&mut self) -> ParseResult<Vec<Item<'tcx>>> {
         let mut items = vec![];
         loop {
             let token = self.peek(0);
@@ -107,7 +111,7 @@ impl<'a> Parser<'a> {
         Ok(items)
     }
 
-    fn parse_stmts(&mut self) -> ParseResult<Vec<Item>> {
+    fn parse_stmts(&mut self) -> ParseResult<Vec<Item<'tcx>>> {
         let mut items = vec![];
         loop {
             let token = self.peek(0);
@@ -141,7 +145,7 @@ impl<'a> Parser<'a> {
         Ok(items)
     }
 
-    fn parse_assign_or_expr(&mut self, lhs: Expression) -> ParseResult<Item> {
+    fn parse_assign_or_expr(&mut self, lhs: Expression) -> ParseResult<Item<'tcx>> {
         let item = if self.match_many(&['+', '=']) {
             Item::Assignment {
                 lhs,
@@ -294,7 +298,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_fn(&mut self) -> ParseResult<Item> {
+    fn parse_fn(&mut self) -> ParseResult<Item<'tcx>> {
         self.expect_keyword(Keyword::Fn)?;
         let identifier = self.expect_identifier()?.as_string();
         self.expect_one('(')?;
@@ -329,7 +333,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_let(&mut self) -> ParseResult<Item> {
+    fn parse_let(&mut self) -> ParseResult<Item<'tcx>> {
         self.expect_keyword(Keyword::Let)?;
         let identifier = self.expect_identifier()?.as_string();
         let ty = if self.match_one(':') {
@@ -353,9 +357,9 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_ty(&mut self) -> ParseResult<Ty> {
+    fn parse_ty(&mut self) -> ParseResult<&'tcx Ty<'tcx>> {
         let token = self.advance();
-        match token.get_type() {
+        let ty = match token.get_type() {
             TokenType::Punct('[') => {
                 let token = self.peek(0);
                 let length = match token.get_type() {
@@ -369,11 +373,11 @@ impl<'a> Parser<'a> {
                 self.expect_one(']')?;
                 let ty = self.parse_ty()?;
                 match length {
-                    Some(length) => Ok(Ty::Array(length, Box::new(ty))),
-                    None => Ok(Ty::Slice(Box::new(ty))),
+                    Some(length) => Ok(Ty::Array(length, ty)),
+                    None => Ok(Ty::Slice(ty)),
                 }
             }
-            TokenType::Punct('*') => Ok(Ty::Pointer(Box::new(self.parse_ty()?))),
+            TokenType::Punct('*') => Ok(Ty::Pointer(self.parse_ty()?)),
             TokenType::Identifier => Ok(match token.as_slice() {
                 "bool" => Ty::Bool,
                 "i32" => Ty::I32,
@@ -382,25 +386,26 @@ impl<'a> Parser<'a> {
             }),
             TokenType::Keyword(Keyword::Fn) => {
                 self.expect_one('(')?;
-                let args = self.parse_tuple()?;
+                let args = self.parse_ty_tuple()?;
 
                 let ret = if self.match_many(&['-', '>']) {
                     self.parse_ty()?
                 } else {
-                    Ty::Tuple(vec![])
+                    self.ty.alloc(Ty::Unit)
                 };
 
-                Ok(Ty::Function(args, Box::new(ret)))
+                Ok(Ty::Function(args, ret))
             }
             TokenType::Punct('(') => {
-                let types = self.parse_tuple()?;
+                let types = self.parse_ty_tuple()?;
                 Ok(Ty::Tuple(types))
             }
             _ => unimplemented!(),
-        }
+        };
+        ty.map(|ty| &*self.ty.alloc(ty))
     }
 
-    fn parse_tuple(&mut self) -> ParseResult<Vec<Ty>> {
+    fn parse_ty_tuple(&mut self) -> ParseResult<Vec<&'tcx Ty<'tcx>>> {
         let mut args = vec![];
         loop {
             if self.match_one(')') {
@@ -415,7 +420,7 @@ impl<'a> Parser<'a> {
         Ok(args)
     }
 
-    fn parse_for(&mut self) -> ParseResult<Item> {
+    fn parse_for(&mut self) -> ParseResult<Item<'tcx>> {
         self.expect_keyword(Keyword::For)?;
         let identifier = self.expect_identifier()?.as_string();
         self.expect_keyword(Keyword::In)?;
@@ -430,7 +435,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_if(&mut self) -> ParseResult<Item> {
+    fn parse_if(&mut self) -> ParseResult<Item<'tcx>> {
         self.expect_keyword(Keyword::If)?;
         let condition = self.parse_expr(0)?;
         self.expect_one('{')?;
@@ -451,20 +456,20 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_yield(&mut self) -> ParseResult<Item> {
+    fn parse_yield(&mut self) -> ParseResult<Item<'tcx>> {
         self.expect_keyword(Keyword::Yield)?;
         let value = self.parse_expr(0)?;
         Ok(Item::Yield(Box::new(value)))
     }
 
-    fn parse_return(&mut self) -> ParseResult<Item> {
+    fn parse_return(&mut self) -> ParseResult<Item<'tcx>> {
         self.expect_keyword(Keyword::Return)?;
         let value = self.parse_expr(0)?;
         self.expect_one(';')?;
         Ok(Item::Return(Box::new(value)))
     }
 
-    fn expect_keyword(&mut self, keyword: Keyword) -> ParseResult<Token<'a>> {
+    fn expect_keyword(&mut self, keyword: Keyword) -> ParseResult<Token<'lex>> {
         match self.match_keyword(keyword) {
             Some(token) => Ok(token),
             None => Err(self.expected(TokenType::Keyword(keyword))),
@@ -481,21 +486,21 @@ impl<'a> Parser<'a> {
         )
     }
 
-    fn match_keyword(&mut self, keyword: Keyword) -> Option<Token<'a>> {
+    fn match_keyword(&mut self, keyword: Keyword) -> Option<Token<'lex>> {
         match self.peek(0).get_type() {
             TokenType::Keyword(kw) if kw == keyword => Some(self.advance()),
             _ => None,
         }
     }
 
-    fn expect_identifier(&mut self) -> ParseResult<Token<'a>> {
+    fn expect_identifier(&mut self) -> ParseResult<Token<'lex>> {
         match self.match_identifier() {
             Some(token) => Ok(token),
             None => Err(self.expected(TokenType::Identifier)),
         }
     }
 
-    fn match_identifier(&mut self) -> Option<Token<'a>> {
+    fn match_identifier(&mut self) -> Option<Token<'lex>> {
         match self.peek(0).get_type() {
             TokenType::Identifier => Some(self.advance()),
             _ => None,
@@ -575,12 +580,12 @@ impl<'a> Parser<'a> {
     }
 
     /// Returns next token without consuming it
-    fn peek(&mut self, offset: usize) -> Token<'a> {
+    fn peek(&mut self, offset: usize) -> Token<'lex> {
         self.peek.peek(offset).clone()
     }
 
     /// Returns next token and consumes it
-    fn advance(&mut self) -> Token<'a> {
+    fn advance(&mut self) -> Token<'lex> {
         self.peek.advance()
     }
 }

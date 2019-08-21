@@ -4,22 +4,23 @@ use parser::Ty;
 use std::borrow::{Borrow, Cow};
 use std::collections::HashMap;
 
-struct VariableHolder {
-    variables: HashMap<String, Vec<(Ty, Option<Expression>)>>,
+struct VariableHolder<'tcx> {
+    variables: HashMap<String, Vec<(&'tcx Ty<'tcx>, Option<Expression>)>>,
 }
 
-impl VariableHolder {
+impl<'tcx> VariableHolder<'tcx> {
     fn new() -> Self {
         VariableHolder {
             variables: Default::default(),
         }
     }
 
-    fn def<T: Into<String> + Borrow<str>>(&mut self, name: T, ty: Ty, val: Option<Expression>) {
+    fn def<T: Into<String> + Borrow<str>>(&mut self, name: T, ty: &'tcx Ty<'tcx>, val: Option<Expression>) {
+
         self.variables
             .entry(name.into())
             .or_insert_with(Vec::new)
-            .push((ty.clone(), val.clone()));
+            .push((ty, val.clone()));
     }
 
     #[allow(unused)]
@@ -31,7 +32,7 @@ impl VariableHolder {
         }
     }
 
-    fn get<T: Into<String> + Borrow<str>>(&mut self, name: T) -> Option<&(Ty, Option<Expression>)> {
+    fn get<T: Into<String> + Borrow<str>>(&mut self, name: T) -> Option<&(&'tcx Ty<'tcx>, Option<Expression>)> {
         self.variables.get(name.borrow()).and_then(|it| it.last())
     }
 }
@@ -94,13 +95,13 @@ pub(crate) fn genc(fmt: &mut SourceBuilder, items: &[Item]) {
     }
 }
 
-fn genc_item(fmt: &mut SourceBuilder, item: &Item, vars: &mut VariableHolder) {
+fn genc_item<'a, 'tcx: 'a>(fmt: &mut SourceBuilder, item: &'tcx Item<'tcx>, vars: &'a mut VariableHolder<'tcx>) {
     match item {
         Item::Let { name, ty, expr, .. } => {
             fmt.writeln(&format!("{} {} = {};",
-                               format_ty(ty.as_ref().unwrap()),
-                               name,
-                               format_expr(expr.as_ref().unwrap())));
+                                 format_ty(ty.unwrap()),
+                                 name,
+                                 format_expr(expr.as_ref().unwrap())));
             vars.def(name.clone(), ty.clone().unwrap(), expr.clone());
         }
         Item::Assignment {
@@ -124,19 +125,19 @@ fn genc_item(fmt: &mut SourceBuilder, item: &Item, vars: &mut VariableHolder) {
             body,
             ..
         } => {
-            fmt.write(&format!("{} {}(", format_ty(ty.as_ref().unwrap()), name));
+            fmt.write(&format!("{} {}(", format_ty(ty.unwrap()), name));
             if args.is_empty() {
                 fmt.write("void");
             } else {
                 for (i, arg) in args.iter().enumerate() {
-                    fmt.write(&format!("{} {}", format_ty(&arg.ty), arg.name));
+                    fmt.write(&format!("{} {}", format_ty(arg.ty), arg.name));
                     if i != args.len() - 1 {
                         fmt.write(", ");
                     }
                 }
 
                 for arg in args {
-                    vars.def(arg.name.clone(), arg.ty.clone(), None);
+                    vars.def(arg.name.clone(), arg.ty, None);
                 }
             }
 
@@ -178,9 +179,9 @@ fn genc_item(fmt: &mut SourceBuilder, item: &Item, vars: &mut VariableHolder) {
         } => match expr {
             Expression::Identifier(name) => {
                 let (ty, _expr) = vars.get(name.clone()).expect(&name);
-                let (n, ty) = match ty {
-                    Ty::Array(n, ty) => (Some(n), &**ty),
-                    Ty::Slice(ty) => (None, &**ty),
+                let (n, ty) = match *ty {
+                    Ty::Array(n, ty) => (Some(n), ty),
+                    Ty::Slice(ty) => (None, ty),
                     Ty::U32 => (Some(&10), ty),
                     other => {
                         dbg!(other);
@@ -230,15 +231,10 @@ fn format_ty(ty: &Ty) -> Cow<'static, str> {
         Ty::U32 => Cow::Borrowed("uint32_t"),
         Ty::I32 => Cow::Borrowed("int32_t"),
         Ty::Array(len, ty) => Cow::Owned(format!("{}[{}]", format_ty(&**ty), len)),
-        Ty::Slice(_ty) => Cow::Owned(format!("Slice")),
+        Ty::Slice(_) => Cow::Owned(format!("Slice")),
         Ty::Other(_) => Cow::Borrowed("/* generated */"),
-        Ty::Tuple(tys) => {
-            if tys.is_empty() {
-                Cow::Borrowed("void")
-            } else {
-                Cow::Borrowed("/* generated */")
-            }
-        }
+        Ty::Tuple(_) => Cow::Borrowed("/* generated */"),
+        Ty::Unit => Cow::Borrowed("void)"),
         Ty::Function(..) => Cow::Borrowed("void*"),
         Ty::Pointer(inner) => Cow::Owned(format!("{}*", format_ty(&**inner))),
         Ty::Bool => Cow::Borrowed("bool"),

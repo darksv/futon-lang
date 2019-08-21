@@ -2,9 +2,9 @@ use lexer::TokenType;
 use parser::Ty;
 
 #[derive(Debug)]
-pub struct Argument {
+pub struct Argument<'tcx> {
     pub name: String,
-    pub ty: Ty,
+    pub ty: &'tcx Ty<'tcx>,
 }
 
 #[derive(Debug, Clone)]
@@ -21,10 +21,10 @@ pub enum Expression {
 }
 
 #[derive(Debug)]
-pub enum Item {
+pub enum Item<'tcx> {
     Let {
         name: String,
-        ty: Option<Ty>,
+        ty: Option<&'tcx Ty<'tcx>>,
         expr: Option<Expression>,
     },
     Assignment {
@@ -37,19 +37,19 @@ pub enum Item {
     },
     Function {
         name: String,
-        args: Vec<Argument>,
-        ty: Option<Ty>,
-        body: Vec<Item>,
+        args: Vec<Argument<'tcx>>,
+        ty: Option<&'tcx Ty<'tcx>>,
+        body: Vec<Item<'tcx>>,
     },
     If {
         condition: Expression,
-        arm_true: Vec<Item>,
-        arm_false: Option<Vec<Item>>,
+        arm_true: Vec<Item<'tcx>>,
+        arm_false: Option<Vec<Item<'tcx>>>,
     },
     ForIn {
         name: String,
         expr: Expression,
-        body: Vec<Item>,
+        body: Vec<Item<'tcx>>,
     },
     Break,
     Yield(Box<Expression>),
