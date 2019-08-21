@@ -1,10 +1,12 @@
 use lexer::TokenType;
-use parser::Ty;
+use parser::TyS;
+
+pub(crate) type Ty<'tcx> = &'tcx TyS<'tcx>;
 
 #[derive(Debug)]
 pub struct Argument<'tcx> {
     pub name: String,
-    pub ty: &'tcx Ty<'tcx>,
+    pub ty: Ty<'tcx>,
 }
 
 #[derive(Debug, Clone)]
@@ -24,7 +26,7 @@ pub enum Expression {
 pub enum Item<'tcx> {
     Let {
         name: String,
-        ty: Option<&'tcx Ty<'tcx>>,
+        ty: Option<Ty<'tcx>>,
         expr: Option<Expression>,
     },
     Assignment {
@@ -38,7 +40,7 @@ pub enum Item<'tcx> {
     Function {
         name: String,
         args: Vec<Argument<'tcx>>,
-        ty: Option<&'tcx Ty<'tcx>>,
+        ty: Option<Ty<'tcx>>,
         body: Vec<Item<'tcx>>,
     },
     If {

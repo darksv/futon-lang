@@ -1,11 +1,11 @@
 use super::{Keyword, Lexer, PunctKind, Token, TokenType};
-use ast::{Argument, Expression, Item};
+use ast::{Argument, Expression, Item, Ty};
 use std::fmt;
 use typed_arena::Arena;
 
 pub struct Parser<'lex, 'tcx> {
     peek: MultiPeek<'lex>,
-    ty: &'tcx Arena<Ty<'tcx>>
+    ty: &'tcx Arena<TyS<'tcx>>
 }
 
 struct MultiPeek<'lex> {
@@ -74,23 +74,23 @@ impl fmt::Debug for ParseError {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub enum Ty<'t> {
+pub enum TyS<'t> {
     Bool,
     U32,
     I32,
-    Array(usize, &'t Ty<'t>),
-    Slice(&'t Ty<'t>),
+    Array(usize, &'t TyS<'t>),
+    Slice(&'t TyS<'t>),
     Unit,
-    Tuple(Vec<&'t Ty<'t>>),
-    Function(Vec<&'t Ty<'t>>, &'t Ty<'t>),
-    Pointer(&'t Ty<'t>),
+    Tuple(Vec<&'t TyS<'t>>),
+    Function(Vec<&'t TyS<'t>>, &'t TyS<'t>),
+    Pointer(&'t TyS<'t>),
     Other(String),
 }
 
 type ParseResult<T> = Result<T, ParseError>;
 
 impl<'lex, 'tcx> Parser<'lex, 'tcx> {
-    pub fn new(lex: &'lex mut Lexer<'lex>, arena: &'tcx Arena<Ty<'tcx>>) -> Parser<'lex, 'tcx> {
+    pub fn new(lex: &'lex mut Lexer<'lex>, arena: &'tcx Arena<TyS<'tcx>>) -> Parser<'lex, 'tcx> {
         Parser {
             peek: MultiPeek::new(lex),
             ty: arena
@@ -357,7 +357,7 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
         })
     }
 
-    fn parse_ty(&mut self) -> ParseResult<&'tcx Ty<'tcx>> {
+    fn parse_ty(&mut self) -> ParseResult<Ty<'tcx>> {
         let token = self.advance();
         let ty = match token.get_type() {
             TokenType::Punct('[') => {
@@ -373,16 +373,16 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
                 self.expect_one(']')?;
                 let ty = self.parse_ty()?;
                 match length {
-                    Some(length) => Ok(Ty::Array(length, ty)),
-                    None => Ok(Ty::Slice(ty)),
+                    Some(length) => Ok(TyS::Array(length, ty)),
+                    None => Ok(TyS::Slice(ty)),
                 }
             }
-            TokenType::Punct('*') => Ok(Ty::Pointer(self.parse_ty()?)),
+            TokenType::Punct('*') => Ok(TyS::Pointer(self.parse_ty()?)),
             TokenType::Identifier => Ok(match token.as_slice() {
-                "bool" => Ty::Bool,
-                "i32" => Ty::I32,
-                "u32" => Ty::U32,
-                ud => Ty::Other(ud.to_string()),
+                "bool" => TyS::Bool,
+                "i32" => TyS::I32,
+                "u32" => TyS::U32,
+                ud => TyS::Other(ud.to_string()),
             }),
             TokenType::Keyword(Keyword::Fn) => {
                 self.expect_one('(')?;
@@ -391,21 +391,21 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
                 let ret = if self.match_many(&['-', '>']) {
                     self.parse_ty()?
                 } else {
-                    self.ty.alloc(Ty::Unit)
+                    self.ty.alloc(TyS::Unit)
                 };
 
-                Ok(Ty::Function(args, ret))
+                Ok(TyS::Function(args, ret))
             }
             TokenType::Punct('(') => {
                 let types = self.parse_ty_tuple()?;
-                Ok(Ty::Tuple(types))
+                Ok(TyS::Tuple(types))
             }
             _ => unimplemented!(),
         };
         ty.map(|ty| &*self.ty.alloc(ty))
     }
 
-    fn parse_ty_tuple(&mut self) -> ParseResult<Vec<&'tcx Ty<'tcx>>> {
+    fn parse_ty_tuple(&mut self) -> ParseResult<Vec<Ty<'tcx>>> {
         let mut args = vec![];
         loop {
             if self.match_one(')') {

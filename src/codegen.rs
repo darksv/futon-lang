@@ -1,11 +1,12 @@
-use ast::{Expression, Item};
+use ast::{Expression, Item, Ty};
 use lexer::TokenType;
-use parser::Ty;
 use std::borrow::{Borrow, Cow};
 use std::collections::HashMap;
+use parser::TyS;
+
 
 struct VariableHolder<'tcx> {
-    variables: HashMap<String, Vec<(&'tcx Ty<'tcx>, Option<Expression>)>>,
+    variables: HashMap<String, Vec<(Ty<'tcx>, Option<Expression>)>>,
 }
 
 impl<'tcx> VariableHolder<'tcx> {
@@ -15,7 +16,7 @@ impl<'tcx> VariableHolder<'tcx> {
         }
     }
 
-    fn def<T: Into<String> + Borrow<str>>(&mut self, name: T, ty: &'tcx Ty<'tcx>, val: Option<Expression>) {
+    fn def<T: Into<String> + Borrow<str>>(&mut self, name: T, ty: Ty<'tcx>, val: Option<Expression>) {
 
         self.variables
             .entry(name.into())
@@ -32,7 +33,7 @@ impl<'tcx> VariableHolder<'tcx> {
         }
     }
 
-    fn get<T: Into<String> + Borrow<str>>(&mut self, name: T) -> Option<&(&'tcx Ty<'tcx>, Option<Expression>)> {
+    fn get<T: Into<String> + Borrow<str>>(&mut self, name: T) -> Option<&(Ty<'tcx>, Option<Expression>)> {
         self.variables.get(name.borrow()).and_then(|it| it.last())
     }
 }
@@ -180,9 +181,9 @@ fn genc_item<'a, 'tcx: 'a>(fmt: &mut SourceBuilder, item: &'tcx Item<'tcx>, vars
             Expression::Identifier(name) => {
                 let (ty, _expr) = vars.get(name.clone()).expect(&name);
                 let (n, ty) = match *ty {
-                    Ty::Array(n, ty) => (Some(n), ty),
-                    Ty::Slice(ty) => (None, ty),
-                    Ty::U32 => (Some(&10), ty),
+                    TyS::Array(n, ty) => (Some(n), ty),
+                    TyS::Slice(ty) => (None, ty),
+                    TyS::U32 => (Some(&10), ty),
                     other => {
                         dbg!(other);
                         unimplemented!()
@@ -226,18 +227,18 @@ fn genc_item<'a, 'tcx: 'a>(fmt: &mut SourceBuilder, item: &'tcx Item<'tcx>, vars
     }
 }
 
-fn format_ty(ty: &Ty) -> Cow<'static, str> {
+fn format_ty(ty: &TyS) -> Cow<'static, str> {
     match ty {
-        Ty::U32 => Cow::Borrowed("uint32_t"),
-        Ty::I32 => Cow::Borrowed("int32_t"),
-        Ty::Array(len, ty) => Cow::Owned(format!("{}[{}]", format_ty(&**ty), len)),
-        Ty::Slice(_) => Cow::Owned(format!("Slice")),
-        Ty::Other(_) => Cow::Borrowed("/* generated */"),
-        Ty::Tuple(_) => Cow::Borrowed("/* generated */"),
-        Ty::Unit => Cow::Borrowed("void)"),
-        Ty::Function(..) => Cow::Borrowed("void*"),
-        Ty::Pointer(inner) => Cow::Owned(format!("{}*", format_ty(&**inner))),
-        Ty::Bool => Cow::Borrowed("bool"),
+        TyS::U32 => Cow::Borrowed("uint32_t"),
+        TyS::I32 => Cow::Borrowed("int32_t"),
+        TyS::Array(len, ty) => Cow::Owned(format!("{}[{}]", format_ty(&**ty), len)),
+        TyS::Slice(_) => Cow::Owned(format!("Slice")),
+        TyS::Other(_) => Cow::Borrowed("/* generated */"),
+        TyS::Tuple(_) => Cow::Borrowed("/* generated */"),
+        TyS::Unit => Cow::Borrowed("void)"),
+        TyS::Function(..) => Cow::Borrowed("void*"),
+        TyS::Pointer(inner) => Cow::Owned(format!("{}*", format_ty(&**inner))),
+        TyS::Bool => Cow::Borrowed("bool"),
     }
 }
 
