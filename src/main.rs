@@ -3,6 +3,7 @@ extern crate typed_arena;
 mod ast;
 mod codegen;
 mod lexer;
+mod multi_peek;
 mod parser;
 
 use lexer::{Keyword, Lexer, PunctKind, Token, TokenType};
@@ -22,9 +23,9 @@ fn main() {
         let mut content = String::new();
         BufReader::new(file).read_to_string(&mut content).unwrap();
 
-        let mut lex = Lexer::from_source(&content);
+        let lex = Lexer::from_source(&content);
         let arena = Arena::default();
-        let mut parser = Parser::new(&mut lex, &arena);
+        let mut parser = Parser::new(lex, &arena);
         match parser.parse() {
             Ok(k) => {
                 let mut s = SourceBuilder::new();

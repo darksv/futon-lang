@@ -543,6 +543,14 @@ impl<'a> Lexer<'a> {
     }
 }
 
+impl<'a> Iterator for Lexer<'a> {
+    type Item = Token<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next().ok()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Keyword, Lexer, LexerError, SourceSpan, Token, TokenType, TokenValue};

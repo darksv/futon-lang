@@ -2,53 +2,11 @@ use super::{Keyword, Lexer, PunctKind, Token, TokenType};
 use ast::{Argument, Expression, Item, Ty};
 use std::fmt;
 use typed_arena::Arena;
+use multi_peek::MultiPeek;
 
 pub struct Parser<'lex, 'tcx> {
-    peek: MultiPeek<'lex>,
+    peek: MultiPeek<Token<'lex>, Lexer<'lex>>,
     ty: &'tcx Arena<TyS<'tcx>>
-}
-
-struct MultiPeek<'lex> {
-    peeked: [Option<Token<'lex>>; 2],
-    index: usize,
-    length: usize,
-    lex: &'lex mut Lexer<'lex>,
-}
-
-impl<'lex> MultiPeek<'lex> {
-    fn new(lex: &'lex mut Lexer<'lex>) -> Self {
-        MultiPeek {
-            peeked: [None, None],
-            index: 0,
-            length: 0,
-            lex,
-        }
-    }
-
-    /// Returns next item without consuming it
-    pub fn peek(&mut self, offset: usize) -> &Token<'lex> {
-        self.ensure_peeked(offset);
-        self.peeked[(self.index + offset) % self.peeked.len()]
-            .as_ref()
-            .unwrap()
-    }
-
-    /// Returns next item and removes it from queue
-    pub fn advance(&mut self) -> Token<'lex> {
-        self.ensure_peeked(0);
-        let item = self.peeked[self.index].take().unwrap();
-        self.length -= 1;
-        self.index = (self.index + 1) % self.peeked.len();
-        item
-    }
-
-    /// Ensures that next token (if any) is taken from lexer
-    fn ensure_peeked(&mut self, offset: usize) {
-        if self.length <= offset {
-            self.peeked[(self.index + self.length) % self.peeked.len()] = self.lex.next().ok();
-            self.length += 1;
-        }
-    }
 }
 
 pub enum ParseError {
@@ -90,7 +48,7 @@ pub enum TyS<'t> {
 type ParseResult<T> = Result<T, ParseError>;
 
 impl<'lex, 'tcx> Parser<'lex, 'tcx> {
-    pub fn new(lex: &'lex mut Lexer<'lex>, arena: &'tcx Arena<TyS<'tcx>>) -> Parser<'lex, 'tcx> {
+    pub fn new(lex: Lexer<'lex>, arena: &'tcx Arena<TyS<'tcx>>) -> Parser<'lex, 'tcx> {
         Parser {
             peek: MultiPeek::new(lex),
             ty: arena
