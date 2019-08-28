@@ -1,8 +1,8 @@
 use super::{Keyword, Lexer, PunctKind, Token, TokenType};
-use ast::{Argument, Expression, Item, Ty, Field};
+use crate::ast::{Argument, Expression, Item, Ty, Field};
 use std::fmt;
-use typed_arena::Arena;
-use multi_peek::MultiPeek;
+use crate::multi_peek::MultiPeek;
+use crate::arena::Arena;
 
 pub struct Parser<'lex, 'tcx> {
     peek: MultiPeek<Token<'lex>, Lexer<'lex>>,
@@ -388,7 +388,11 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
     }
 
     fn make_ty(&self, ty: TyS<'tcx>) -> Ty<'tcx> {
-        &*self.ty.alloc(ty)
+        if let Some(ty) = self.ty.find(&ty) {
+            dbg!(ty);
+            return ty;
+        }
+        self.ty.alloc(ty)
     }
 
     fn parse_ty_tuple(&mut self) -> ParseResult<Vec<Ty<'tcx>>> {

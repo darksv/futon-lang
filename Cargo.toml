@@ -2,6 +2,6 @@
 name = "untitled"
 version = "0.1.0"
 authors = ["darksv <darek969-12@o2.pl>"]
+edition = "2018"
 
 [dependencies]
-typed-arena = "1.5.0"

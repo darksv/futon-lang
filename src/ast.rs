@@ -1,5 +1,5 @@
-use lexer::TokenType;
-use parser::TyS;
+use crate::lexer::TokenType;
+use crate::parser::TyS;
 
 pub(crate) type Ty<'tcx> = &'tcx TyS<'tcx>;
 

@@ -1,5 +1,4 @@
-extern crate typed_arena;
-
+mod arena;
 mod ast;
 mod codegen;
 mod lexer;
@@ -9,7 +8,7 @@ mod parser;
 use lexer::{Keyword, Lexer, PunctKind, Token, TokenType};
 use parser::Parser;
 use codegen::SourceBuilder;
-use typed_arena::Arena;
+use crate::arena::Arena;
 
 fn main() {
     use std::fs::File;
