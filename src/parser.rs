@@ -1,5 +1,5 @@
 use super::{Keyword, Lexer, PunctKind, Token, TokenType};
-use ast::{Argument, Expression, Item, Ty};
+use ast::{Argument, Expression, Item, Ty, Field};
 use std::fmt;
 use typed_arena::Arena;
 use multi_peek::MultiPeek;
@@ -61,6 +61,7 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
             let token = self.peek(0);
             let item = match token.get_type() {
                 TokenType::Keyword(Keyword::Fn) => self.parse_fn(),
+                TokenType::Keyword(Keyword::Struct) => self.parse_struct(),
                 TokenType::EndOfSource => break,
                 token_type => unimplemented!("{:?}", token_type),
             };
@@ -254,6 +255,29 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
             TokenType::Punct('-') => true,
             _ => false,
         }
+    }
+
+    fn parse_struct(&mut self) -> ParseResult<Item<'tcx>> {
+        self.expect_keyword(Keyword::Struct)?;
+        let identifier = self.expect_identifier()?.as_string();
+        self.expect_one('{')?;
+        let mut fields = vec![];
+        while let Some(t) = self.match_identifier() {
+            self.expect_one(':')?;
+            let ty = self.parse_ty()?;
+            fields.push(Field {
+                name: t.as_string(),
+                ty,
+            });
+            if !self.match_one(',') {
+                break;
+            }
+        }
+        self.expect_one('}')?;
+        Ok(Item::Struct {
+            name: identifier,
+            fields,
+        })
     }
 
     fn parse_fn(&mut self) -> ParseResult<Item<'tcx>> {

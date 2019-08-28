@@ -150,6 +150,23 @@ fn genc_item<'a, 'tcx: 'a>(fmt: &mut SourceBuilder, item: &'tcx Item<'tcx>, vars
             fmt.unshift();
             fmt.writeln("}");
         }
+        Item::Struct {
+            name,
+            fields,
+        } => {
+            fmt.write("struct ");
+            fmt.write(&name);
+            fmt.writeln(" {");
+            fmt.shift();
+            for field in fields {
+                fmt.write(&format_ty(field.ty));
+                fmt.write(" ");
+                fmt.write(&field.name);
+                fmt.writeln(";");
+            }
+            fmt.unshift();
+            fmt.writeln("}");
+        }
         Item::If {
             condition,
             arm_true,

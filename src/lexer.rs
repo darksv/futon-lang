@@ -34,6 +34,7 @@ keywords! {
     "while" => While,
     "loop" => Loop,
     "fn" => Fn,
+    "struct" => Struct,
     "yield" => Yield,
     "return" => Return,
     "break" => Break,

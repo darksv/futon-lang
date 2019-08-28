@@ -9,6 +9,12 @@ pub struct Argument<'tcx> {
     pub ty: Ty<'tcx>,
 }
 
+#[derive(Debug)]
+pub struct Field<'tcx> {
+    pub name: String,
+    pub ty: Ty<'tcx>,
+}
+
 #[derive(Debug, Clone)]
 pub enum Expression {
     Identifier(String),
@@ -42,6 +48,10 @@ pub enum Item<'tcx> {
         args: Vec<Argument<'tcx>>,
         ty: Option<Ty<'tcx>>,
         body: Vec<Item<'tcx>>,
+    },
+    Struct {
+        name: String,
+        fields: Vec<Field<'tcx>>,
     },
     If {
         condition: Expression,
