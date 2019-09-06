@@ -290,13 +290,13 @@ fn format_ty(ty: Ty) -> Cow<str> {
     match ty {
         TyS::U32 => Cow::Borrowed("uint32_t"),
         TyS::I32 => Cow::Borrowed("int32_t"),
-        TyS::Array(len, ty) => Cow::Owned(format!("{}[{}]", format_ty(&**ty), len)),
+        TyS::Array(len, ty) => Cow::Owned(format!("{}[{}]", format_ty(ty), len)),
         TyS::Slice(_) => Cow::Owned(format!("Slice")),
         TyS::Other(name) => Cow::Borrowed(name.as_str()),
         TyS::Tuple(_) => Cow::Borrowed("/* generated */"),
         TyS::Unit => Cow::Borrowed("void)"),
         TyS::Function(..) => Cow::Borrowed("void*"),
-        TyS::Pointer(inner) => Cow::Owned(format!("{}*", format_ty(&**inner))),
+        TyS::Pointer(inner) => Cow::Owned(format!("{}*", format_ty(inner))),
         TyS::Bool => Cow::Borrowed("bool"),
     }
 }
@@ -314,7 +314,7 @@ fn format_expr(ty: &Expression) -> Cow<str> {
         Expression::Integer(value) => Cow::Owned(value.to_string()),
         Expression::Float(value) => Cow::Owned(value.to_string()),
         Expression::Prefix(op, expr) => {
-            Cow::Owned(format!("{}{}", format_operator(op), format_expr(&**expr)))
+            Cow::Owned(format!("{}{}", format_operator(op), format_expr(expr)))
         }
         Expression::Infix(op, lhs, rhs) => Cow::Owned(format!(
             "({} {} {})",
@@ -326,7 +326,7 @@ fn format_expr(ty: &Expression) -> Cow<str> {
             let mut s = String::new();
             s.push('{');
             for (i, value) in values.iter().enumerate() {
-                s.push_str(&*format_expr(value));
+                s.push_str(format_expr(value).as_ref());
                 if i != values.len() - 1 {
                     s.push_str(", ");
                 }
@@ -341,7 +341,7 @@ fn format_expr(ty: &Expression) -> Cow<str> {
             s.push(')');
             s.push('(');
             for (i, arg) in args.iter().enumerate() {
-                s.push_str(&*format_expr(arg).as_ref());
+                s.push_str(format_expr(arg).as_ref());
                 if i != args.len() - 1 {
                     s.push_str(", ");
                 }
