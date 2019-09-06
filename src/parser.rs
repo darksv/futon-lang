@@ -31,7 +31,7 @@ impl fmt::Debug for ParseError {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum TyS<'t> {
     Bool,
     U32,
@@ -76,6 +76,7 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
             let token = self.peek(0);
             let item = match token.get_type() {
                 TokenType::Keyword(Keyword::Let) => self.parse_let(),
+                TokenType::Keyword(Keyword::Loop) => self.parse_loop(),
                 TokenType::Keyword(Keyword::For) => self.parse_for(),
                 TokenType::Keyword(Keyword::Fn) => self.parse_fn(),
                 TokenType::Keyword(Keyword::If) => self.parse_if(),
@@ -83,6 +84,7 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
                 TokenType::Keyword(Keyword::Return) => self.parse_return(),
                 TokenType::Keyword(Keyword::Break) => {
                     self.advance();
+                    self.expect_one(';')?;
                     Ok(Item::Break)
                 }
                 TokenType::Punct('*') => {
@@ -210,6 +212,11 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
                     let rhs = self.parse_expr(new_precedence)?;
                     Expression::Infix(op.get_type(), Box::new(expr), Box::new(rhs))
                 }
+                TokenType::Punct('.') => {
+                    self.advance();
+                    let rhs = self.parse_expr(new_precedence)?;
+                    Expression::Place(Box::new(expr), Box::new(rhs))
+                }
                 TokenType::Punct('<') | TokenType::Punct('>') => {
                     let op = self.advance();
                     let rhs = self.parse_expr(new_precedence)?;
@@ -246,6 +253,7 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
             TokenType::Punct('-') => 1,
             TokenType::Punct('*') => 2,
             TokenType::Punct('/') => 2,
+            TokenType::Punct('.') => 3,
             _ => 0,
         }
     }
@@ -253,6 +261,7 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
     fn is_left_associative(token: &Token) -> bool {
         match token.get_type() {
             TokenType::Punct('-') => true,
+            TokenType::Punct('.') => true,
             _ => false,
         }
     }
@@ -389,7 +398,6 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
 
     fn make_ty(&self, ty: TyS<'tcx>) -> Ty<'tcx> {
         if let Some(ty) = self.ty.find(&ty) {
-            dbg!(ty);
             return ty;
         }
         self.ty.alloc(ty)
@@ -421,6 +429,16 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
         Ok(Item::ForIn {
             name: identifier.to_owned(),
             expr,
+            body: items,
+        })
+    }
+
+    fn parse_loop(&mut self) -> ParseResult<Item<'tcx>> {
+        self.expect_keyword(Keyword::Loop)?;
+        self.expect_one('{')?;
+        let items = self.parse_stmts()?;
+        self.expect_one('}')?;
+        Ok(Item::Loop {
             body: items,
         })
     }

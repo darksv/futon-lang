@@ -23,6 +23,7 @@ pub enum Expression {
     Bool(bool),
     Prefix(TokenType, Box<Expression>),
     Infix(TokenType, Box<Expression>, Box<Expression>),
+    Place(Box<Expression>, Box<Expression>),
     Array(Vec<Expression>),
     Tuple(Vec<Expression>),
     Call(Box<Expression>, Vec<Expression>),
@@ -61,6 +62,9 @@ pub enum Item<'tcx> {
     ForIn {
         name: String,
         expr: Expression,
+        body: Vec<Item<'tcx>>,
+    },
+    Loop {
         body: Vec<Item<'tcx>>,
     },
     Break,

@@ -1,0 +1,15 @@
+struct Node {
+    value: u32,
+    next: *Node
+}
+
+fn walk(head: *Node) -> () {
+    let curr: *Node = head;
+    loop {
+        if curr {
+            curr = curr.next;
+        } else {
+            break;
+        }
+    }
+}

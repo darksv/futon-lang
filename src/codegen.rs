@@ -1,7 +1,7 @@
 use crate::ast::{Expression, Item, Ty};
 use crate::lexer::TokenType;
 use std::borrow::{Borrow, Cow};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use crate::parser::TyS;
 
 
@@ -17,7 +17,6 @@ impl<'tcx> VariableHolder<'tcx> {
     }
 
     fn def<T: Into<String> + Borrow<str>>(&mut self, name: T, ty: Ty<'tcx>, val: Option<Expression>) {
-
         self.variables
             .entry(name.into())
             .or_insert_with(Vec::new)
@@ -88,17 +87,23 @@ impl SourceBuilder {
 
 pub(crate) fn genc(fmt: &mut SourceBuilder, items: &[Item]) {
     fmt.writeln(r"#include <stdint.h>");
-    fmt.writeln(r"typedef struct Slice { void* ptr; uint64_t len; };");
 
     let mut vars = VariableHolder::new();
+    let mut emitted = HashSet::new();
     for item in items {
-        genc_item(fmt, item, &mut vars);
+        genc_item(fmt, item, &mut vars, &mut emitted);
     }
 }
 
-fn genc_item<'a, 'tcx: 'a>(fmt: &mut SourceBuilder, item: &'tcx Item<'tcx>, vars: &'a mut VariableHolder<'tcx>) {
+fn genc_item<'a, 'tcx: 'a>(
+    fmt: &mut SourceBuilder,
+    item: &'tcx Item<'tcx>,
+    vars: &'a mut VariableHolder<'tcx>,
+    emitted_tys: &mut HashSet<Ty<'tcx>>,
+) {
     match item {
         Item::Let { name, ty, expr, .. } => {
+            ensure_ty_emitted(fmt, emitted_tys, ty.unwrap());
             fmt.writeln(&format!("{} {} = {};",
                                  format_ty(ty.unwrap()),
                                  name,
@@ -126,6 +131,7 @@ fn genc_item<'a, 'tcx: 'a>(fmt: &mut SourceBuilder, item: &'tcx Item<'tcx>, vars
             body,
             ..
         } => {
+            ensure_ty_emitted(fmt, emitted_tys, ty.unwrap());
             fmt.write(&format!("{} {}(", format_ty(ty.unwrap()), name));
             if args.is_empty() {
                 fmt.write("void");
@@ -139,34 +145,19 @@ fn genc_item<'a, 'tcx: 'a>(fmt: &mut SourceBuilder, item: &'tcx Item<'tcx>, vars
 
                 for arg in args {
                     vars.def(arg.name.clone(), arg.ty, None);
+                    ensure_ty_emitted(fmt, emitted_tys, arg.ty);
                 }
             }
 
             fmt.writeln(") {");
             fmt.shift();
             for b in body {
-                genc_item(fmt, b, vars);
+                genc_item(fmt, b, vars, emitted_tys);
             }
             fmt.unshift();
             fmt.writeln("}");
         }
-        Item::Struct {
-            name,
-            fields,
-        } => {
-            fmt.write("struct ");
-            fmt.write(&name);
-            fmt.writeln(" {");
-            fmt.shift();
-            for field in fields {
-                fmt.write(&format_ty(field.ty));
-                fmt.write(" ");
-                fmt.write(&field.name);
-                fmt.writeln(";");
-            }
-            fmt.unshift();
-            fmt.writeln("}");
-        }
+        Item::Struct { .. } => {}
         Item::If {
             condition,
             arm_true,
@@ -176,14 +167,14 @@ fn genc_item<'a, 'tcx: 'a>(fmt: &mut SourceBuilder, item: &'tcx Item<'tcx>, vars
             fmt.shift();
             for item in arm_true {
                 fmt.shift();
-                genc_item(fmt, item, vars);
+                genc_item(fmt, item, vars, emitted_tys);
                 fmt.unshift();
             }
             if let Some(arm_false) = arm_false {
                 fmt.writeln("} else {");
                 for item in arm_false {
                     fmt.shift();
-                    genc_item(fmt, item, vars);
+                    genc_item(fmt, item, vars, emitted_tys);
                     fmt.unshift();
                 }
             }
@@ -226,14 +217,16 @@ fn genc_item<'a, 'tcx: 'a>(fmt: &mut SourceBuilder, item: &'tcx Item<'tcx>, vars
                     ));
                 }
                 for item in body {
-                    genc_item(fmt, item, vars);
+                    genc_item(fmt, item, vars, emitted_tys);
                 }
                 fmt.unshift();
                 fmt.writeln("}");
             }
             _ => unimplemented!(),
         },
-        Item::Break => {}
+        Item::Break => {
+            fmt.writeln("break;");
+        }
         Item::Yield(_) => {}
         Item::Return(expr) => {
             fmt.writeln(&format!("return {};", format_expr(expr)));
@@ -241,16 +234,65 @@ fn genc_item<'a, 'tcx: 'a>(fmt: &mut SourceBuilder, item: &'tcx Item<'tcx>, vars
         Item::Expr { expr } => {
             fmt.writeln(&format!("{};", format_expr(expr)));
         }
+        Item::Loop { body } => {
+            fmt.writeln("for (;;) {{");
+
+            fmt.shift();
+            for item in body {
+                genc_item(fmt, item, vars, emitted_tys);
+            }
+            fmt.unshift();
+            fmt.writeln("}");
+        }
     }
 }
 
-fn format_ty(ty: &TyS) -> Cow<'static, str> {
+fn ensure_ty_emitted<'tcx>(
+    fmt: &mut SourceBuilder,
+    emitted: &mut HashSet<Ty<'tcx>>,
+    ty: Ty<'tcx>,
+) {
+    if emitted.contains(ty) {
+        return;
+    }
+
+    match ty {
+        TyS::Bool => {}
+        TyS::U32 => {}
+        TyS::I32 => {}
+        TyS::Array(_, _) => {}
+        TyS::Slice(_) => {
+            fmt.writeln(r"typedef struct { void* ptr; uint64_t len; }  Slice;");
+        }
+        TyS::Unit => {}
+        TyS::Tuple(tys) => {
+            fmt.writeln("typedef struct {");
+            fmt.shift();
+            for (idx, ty) in tys.iter().enumerate() {
+                ensure_ty_emitted(fmt, emitted, ty);
+                fmt.write(&format_ty(ty));
+                fmt.write(" ");
+                fmt.write("item");
+                fmt.write(&idx.to_string());
+                fmt.writeln(";");
+            }
+            fmt.unshift();
+            fmt.writeln("} Struct123;");
+        }
+        TyS::Function(_, _) => {}
+        TyS::Pointer(_) => {}
+        TyS::Other(_) => {}
+    }
+    emitted.insert(ty);
+}
+
+fn format_ty(ty: Ty) -> Cow<str> {
     match ty {
         TyS::U32 => Cow::Borrowed("uint32_t"),
         TyS::I32 => Cow::Borrowed("int32_t"),
         TyS::Array(len, ty) => Cow::Owned(format!("{}[{}]", format_ty(&**ty), len)),
         TyS::Slice(_) => Cow::Owned(format!("Slice")),
-        TyS::Other(_) => Cow::Borrowed("/* generated */"),
+        TyS::Other(name) => Cow::Borrowed(name.as_str()),
         TyS::Tuple(_) => Cow::Borrowed("/* generated */"),
         TyS::Unit => Cow::Borrowed("void)"),
         TyS::Function(..) => Cow::Borrowed("void*"),
@@ -276,9 +318,9 @@ fn format_expr(ty: &Expression) -> Cow<str> {
         }
         Expression::Infix(op, lhs, rhs) => Cow::Owned(format!(
             "({} {} {})",
-            format_expr(&**lhs),
+            format_expr(lhs),
             format_operator(op),
-            format_expr(&**rhs)
+            format_expr(rhs)
         )),
         Expression::Array(values) => {
             let mut s = String::new();
@@ -299,16 +341,26 @@ fn format_expr(ty: &Expression) -> Cow<str> {
             s.push(')');
             s.push('(');
             for (i, arg) in args.iter().enumerate() {
-                s.push_str(&*format_expr(arg));
+                s.push_str(&*format_expr(arg).as_ref());
                 if i != args.len() - 1 {
                     s.push_str(", ");
                 }
             }
             s.push(')');
-
             Cow::Owned(s)
         }
         Expression::Tuple(_) => Cow::Borrowed("/* generated */"),
         Expression::Bool(value) => Cow::Borrowed(if *value { "true" } else { "false" }),
+        place @ Expression::Place(_, _) => format_place(place),
+    }
+}
+
+fn format_place(place: &Expression) -> Cow<'_, str> {
+    match place {
+        Expression::Identifier(name) => Cow::Borrowed(name),
+        Expression::Place(base, path) => Cow::Owned(
+            format!("{}.{}", format_place(base), format_place(path))
+        ),
+        _ => unimplemented!()
     }
 }
