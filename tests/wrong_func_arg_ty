@@ -1,0 +1,7 @@
+fn foo(a: fn(u32) -> bool) {}
+
+fn bar(b: bool) -> u32 {}
+
+fn main() {
+    foo(bar);
+}

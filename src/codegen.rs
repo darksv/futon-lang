@@ -103,7 +103,7 @@ fn genc_item<'a, 'tcx: 'a>(
 ) {
     match item {
         Item::Let { name, ty, expr, .. } => {
-            ensure_ty_emitted(fmt, emitted_tys, ty.unwrap());
+            ensure_ty_emitted(fmt, emitted_tys, ty.expect(&format!("no type for {}", name)));
             fmt.writeln(&format!("{} {} = {};",
                                  format_ty(ty.unwrap()),
                                  name,
@@ -192,6 +192,7 @@ fn genc_item<'a, 'tcx: 'a>(
                     TyS::Array(n, ty) => (Some(n), ty),
                     TyS::Slice(ty) => (None, ty),
                     TyS::U32 => (Some(&10), ty),
+                    TyS::I32 => (Some(&10), ty),
                     other => {
                         dbg!(other);
                         unimplemented!()
@@ -222,7 +223,16 @@ fn genc_item<'a, 'tcx: 'a>(
                 fmt.unshift();
                 fmt.writeln("}");
             }
-            _ => unimplemented!(),
+            Expression::Range(to, None) => {
+                fmt.writeln(&format!("for (int64_t i = 0; i < {}; ++i) {{", format_expr(to)));
+                fmt.shift();
+                for item in body {
+                    genc_item(fmt, item, vars, emitted_tys);
+                }
+                fmt.unshift();
+                fmt.writeln("}");
+            }
+            expr => unimplemented!("{:?}", expr),
         },
         Item::Break => {
             fmt.writeln("break;");
@@ -260,6 +270,7 @@ fn ensure_ty_emitted<'tcx>(
         TyS::Bool => {}
         TyS::U32 => {}
         TyS::I32 => {}
+        TyS::F32 => {}
         TyS::Array(_, _) => {}
         TyS::Slice(_) => {
             fmt.writeln(r"typedef struct { void* ptr; uint64_t len; }  Slice;");
@@ -281,6 +292,7 @@ fn ensure_ty_emitted<'tcx>(
         }
         TyS::Function(_, _) => {}
         TyS::Pointer(_) => {}
+        TyS::Range => {}
         TyS::Other(_) => {}
     }
     emitted.insert(ty);
@@ -290,6 +302,7 @@ fn format_ty(ty: Ty) -> Cow<str> {
     match ty {
         TyS::U32 => Cow::Borrowed("uint32_t"),
         TyS::I32 => Cow::Borrowed("int32_t"),
+        TyS::F32 => Cow::Borrowed("float"),
         TyS::Array(len, ty) => Cow::Owned(format!("{}[{}]", format_ty(ty), len)),
         TyS::Slice(_) => Cow::Owned(format!("Slice")),
         TyS::Other(name) => Cow::Borrowed(name.as_str()),
@@ -298,6 +311,7 @@ fn format_ty(ty: Ty) -> Cow<str> {
         TyS::Function(..) => Cow::Borrowed("void*"),
         TyS::Pointer(inner) => Cow::Owned(format!("{}*", format_ty(inner))),
         TyS::Bool => Cow::Borrowed("bool"),
+        TyS::Range => Cow::Borrowed("/* generated */")
     }
 }
 
@@ -352,6 +366,7 @@ fn format_expr(ty: &Expression) -> Cow<str> {
         Expression::Tuple(_) => Cow::Borrowed("/* generated */"),
         Expression::Bool(value) => Cow::Borrowed(if *value { "true" } else { "false" }),
         place @ Expression::Place(_, _) => format_place(place),
+        Expression::Range(_, _) => Cow::Borrowed("/* range */")
     }
 }
 

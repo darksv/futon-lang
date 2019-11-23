@@ -5,6 +5,7 @@ mod lexer;
 mod multi_peek;
 mod parser;
 mod ty;
+mod typeck;
 
 use lexer::{Keyword, Lexer, PunctKind, Token, TokenType};
 use parser::Parser;
@@ -12,6 +13,8 @@ use codegen::SourceBuilder;
 use crate::arena::Arena;
 use std::path::Path;
 use std::env;
+use crate::typeck::infer_types;
+use std::collections::HashMap;
 
 fn main() {
     if let Some(file) = env::args().nth(1) {
@@ -19,6 +22,7 @@ fn main() {
     } else {
         for entry in std::fs::read_dir("tests").unwrap() {
             let entry = entry.unwrap();
+            println!("testing {:?}", entry.path());
             compile_file(entry.path());
         }
     }
@@ -37,11 +41,22 @@ fn compile_file(path: impl AsRef<Path>) {
     let arena = Arena::default();
     let mut parser = Parser::new(lex, &arena);
     match parser.parse() {
-        Ok(k) => {
+        Ok(ref mut k) => {
+            dbg!(&k);
+
             let mut s = SourceBuilder::new();
-            codegen::genc(&mut s, &k);
-            println!("// {}", path.as_ref().to_str().unwrap());
-            println!("{}", s.build());
+            let mut locals = HashMap::new();
+            match infer_types(k, &arena, &mut locals) {
+                Ok(_) => {
+                    codegen::genc(&mut s, k);
+                    println!("// {}", path.as_ref().to_str().unwrap());
+                    println!("{}", s.build());
+                }
+                Err(e) => {
+                    println!("typeck error: {}", e);
+                }
+            }
+
         }
         Err(e) => println!("{:?}", e),
     }

@@ -26,6 +26,7 @@ pub enum Expression {
     Array(Vec<Expression>),
     Tuple(Vec<Expression>),
     Call(Box<Expression>, Vec<Expression>),
+    Range(Box<Expression>, Option<Box<Expression>>)
 }
 
 #[derive(Debug)]
