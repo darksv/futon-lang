@@ -4,6 +4,7 @@ mod codegen;
 mod lexer;
 mod multi_peek;
 mod parser;
+mod ty;
 
 use lexer::{Keyword, Lexer, PunctKind, Token, TokenType};
 use parser::Parser;

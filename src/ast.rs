@@ -1,16 +1,15 @@
 use crate::lexer::TokenType;
-use crate::parser::TyS;
+use crate::ty::Ty;
 
-pub(crate) type Ty<'tcx> = &'tcx TyS<'tcx>;
 
 #[derive(Debug)]
-pub struct Argument<'tcx> {
+pub(crate) struct Argument<'tcx> {
     pub name: String,
     pub ty: Ty<'tcx>,
 }
 
 #[derive(Debug)]
-pub struct Field<'tcx> {
+pub(crate) struct Field<'tcx> {
     pub name: String,
     pub ty: Ty<'tcx>,
 }
@@ -30,7 +29,7 @@ pub enum Expression {
 }
 
 #[derive(Debug)]
-pub enum Item<'tcx> {
+pub(crate) enum Item<'tcx> {
     Let {
         name: String,
         ty: Option<Ty<'tcx>>,

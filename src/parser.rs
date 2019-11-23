@@ -1,8 +1,9 @@
 use super::{Keyword, Lexer, PunctKind, Token, TokenType};
-use crate::ast::{Argument, Expression, Item, Ty, Field};
+use crate::ast::{Argument, Expression, Item, Field};
 use std::fmt;
 use crate::multi_peek::MultiPeek;
 use crate::arena::Arena;
+use crate::ty::{TyS, Ty};
 
 pub struct Parser<'lex, 'tcx> {
     peek: MultiPeek<Token<'lex>, Lexer<'lex>>,
@@ -31,31 +32,18 @@ impl fmt::Debug for ParseError {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub enum TyS<'t> {
-    Bool,
-    U32,
-    I32,
-    Array(usize, Ty<'t>),
-    Slice(Ty<'t>),
-    Unit,
-    Tuple(Vec<Ty<'t>>),
-    Function(Vec<Ty<'t>>, Ty<'t>),
-    Pointer(Ty<'t>),
-    Other(String),
-}
 
 type ParseResult<T> = Result<T, ParseError>;
 
 impl<'lex, 'tcx> Parser<'lex, 'tcx> {
-    pub fn new(lex: Lexer<'lex>, arena: &'tcx Arena<TyS<'tcx>>) -> Parser<'lex, 'tcx> {
+    pub(crate) fn new(lex: Lexer<'lex>, arena: &'tcx Arena<TyS<'tcx>>) -> Parser<'lex, 'tcx> {
         Parser {
             peek: MultiPeek::new(lex),
             ty: arena
         }
     }
 
-    pub fn parse(&mut self) -> ParseResult<Vec<Item<'tcx>>> {
+    pub(crate) fn parse(&mut self) -> ParseResult<Vec<Item<'tcx>>> {
         let mut items = vec![];
         loop {
             let token = self.peek(0);

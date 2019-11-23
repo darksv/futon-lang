@@ -1,8 +1,8 @@
-use crate::ast::{Expression, Item, Ty};
+use crate::ast::{Expression, Item};
 use crate::lexer::TokenType;
 use std::borrow::{Borrow, Cow};
 use std::collections::{HashMap, HashSet};
-use crate::parser::TyS;
+use crate::ty::{Ty, TyS};
 
 
 struct VariableHolder<'tcx> {
