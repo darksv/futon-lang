@@ -147,6 +147,7 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
     items: &'ast mut [Item<'tcx>],
     arena: &'tcx Arena<TyS<'tcx>>,
     locals: &mut HashMap<&'ast str, Ty<'tcx>>,
+    expected_ret_ty: Option<Ty<'tcx>>
 ) -> Result<(), String> {
     for item in items.iter_mut() {
         match item {
@@ -193,7 +194,7 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
                     locals.insert(arg.name.as_str(), arg.ty);
                 }
 
-                infer_types(body, arena, locals)?;
+                infer_types(body, arena, locals, *ty)?;
             }
             Item::Struct { .. } => {
                 dbg!("ifnore struct");
@@ -211,13 +212,19 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
                 };
                 assert!(is_iterable);
                 locals.insert(name.as_str(), arena.alloc(TyS::I32));
-                infer_types(body, arena, locals)?;
+                infer_types(body, arena, locals, expected_ret_ty)?;
             }
             Item::Loop { .. } => {
                 dbg!("ifnore loop");
             }
-            Item::Return(_) => {
-                dbg!("ifnore return");
+            Item::Return(expr) => {
+                if expected_ret_ty.is_none() {
+                    panic!("return outside of a function");
+                }
+                let ty = deduce_expr_ty(expr, arena, locals)?;
+                if !are_types_compatible(ty, expected_ret_ty.unwrap()) {
+                    return Err(format!("function marked as returning {:?} but returned {:?}", expected_ret_ty.unwrap(), ty));
+                }
             }
             other => {
                 unimplemented!("cant typeck {:?}", &other);

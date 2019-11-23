@@ -46,7 +46,7 @@ fn compile_file(path: impl AsRef<Path>) {
 
             let mut s = SourceBuilder::new();
             let mut locals = HashMap::new();
-            match infer_types(k, &arena, &mut locals) {
+            match infer_types(k, &arena, &mut locals, None) {
                 Ok(_) => {
                     codegen::genc(&mut s, k);
                     println!("// {}", path.as_ref().to_str().unwrap());
