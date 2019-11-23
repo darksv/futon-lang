@@ -17,6 +17,8 @@ use crate::typeck::infer_types;
 use std::collections::HashMap;
 
 fn main() {
+    env_logger::init();
+
     if let Some(file) = env::args().nth(1) {
         compile_file(file);
     } else {
@@ -42,8 +44,6 @@ fn compile_file(path: impl AsRef<Path>) {
     let mut parser = Parser::new(lex, &arena);
     match parser.parse() {
         Ok(ref mut k) => {
-            dbg!(&k);
-
             let mut s = SourceBuilder::new();
             let mut locals = HashMap::new();
             match infer_types(k, &arena, &mut locals, None) {

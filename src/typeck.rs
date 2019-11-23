@@ -54,7 +54,7 @@ fn deduce_expr_ty<'tcx>(
         Expression::Infix(op, lhs, rhs) => {
             let lhs_ty = deduce_expr_ty(lhs, arena, &locals)?;
             let rhs_ty = deduce_expr_ty(rhs, arena, &locals)?;
-            println!("{:?} {:?}", lhs_ty, rhs_ty);
+            log::debug!("{:?} {:?}", lhs_ty, rhs_ty);
             if !are_types_compatible(lhs_ty, rhs_ty) {
                 return Err(format!("mismatched types {:?} and {:?}", lhs_ty, rhs_ty));
             }
@@ -74,8 +74,6 @@ fn deduce_expr_ty<'tcx>(
             deduce_expr_ty(expr, arena, &locals)?
         }
         Expression::Identifier(ident) => {
-            dbg!(locals);
-
             if let Some(ty) = locals.get(ident.as_str()) {
                 ty
             } else {
@@ -83,7 +81,7 @@ fn deduce_expr_ty<'tcx>(
             }
         }
         Expression::Place(expr, ty) => {
-            dbg!(expr, ty);
+            log::debug!("{:?} {:?}", expr, ty);
             return Err("unsupported".into());
         }
         Expression::Array(items) => {
@@ -159,7 +157,7 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
                 let expr = expr.as_ref().unwrap();
 
                 let deduced_type = deduce_expr_ty(expr, arena, &locals)?;
-                println!("deduced type {:?} for binding {}", deduced_type, name);
+                log::debug!("deduced type {:?} for binding {}", deduced_type, name);
 
                 match ty {
                     Some(ty) => {
@@ -194,14 +192,14 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
                 let func_ty = arena.alloc(func_ty);
                 locals.insert(name.as_str(), func_ty);
                 for arg in args.iter() {
-                    println!("Found arg {} of type {:?}", &arg.name, arg.ty);
+                    log::debug!("Found arg {} of type {:?}", &arg.name, arg.ty);
                     locals.insert(arg.name.as_str(), arg.ty);
                 }
 
                 infer_types(body, arena, locals, *ty)?;
             }
             Item::Struct { .. } => {
-                dbg!("ifnore struct");
+                log::debug!("ifnore struct");
             }
             Item::If { condition, arm_true: _, arm_false: _ } => {
                 let cond_ty = deduce_expr_ty(condition, arena, &locals)?;
@@ -219,7 +217,7 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
                 infer_types(body, arena, locals, expected_ret_ty)?;
             }
             Item::Loop { .. } => {
-                dbg!("ifnore loop");
+                log::debug!("ifnore loop");
             }
             Item::Return(expr) => {
                 if expected_ret_ty.is_none() {
