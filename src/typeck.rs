@@ -56,7 +56,7 @@ fn deduce_expr_ty<'tcx>(
             let rhs_ty = deduce_expr_ty(rhs, arena, &locals)?;
             println!("{:?} {:?}", lhs_ty, rhs_ty);
             if !are_types_compatible(lhs_ty, rhs_ty) {
-                return Err(format!("mismatched types {:?} and {:?}", lhs, rhs));
+                return Err(format!("mismatched types {:?} and {:?}", lhs_ty, rhs_ty));
             }
 
             match op {
@@ -107,16 +107,16 @@ fn deduce_expr_ty<'tcx>(
                     arena.alloc(TyS::Range)
                 }
                 Expression::Identifier(ident) => {
-                    let callee = locals.get(ident.as_str()).expect("a type");
+                    let callee = locals.get(ident.as_str()).expect(&format!("a type for {}", ident.as_str()));
                     let (args_ty, ret_ty) = match callee {
                         TyS::Function(args_ty, ret_ty) => (args_ty, ret_ty),
-                        _ => panic!("{} is not callable", ident.as_str())
+                        _ => return Err(format!("{} is not callable", ident.as_str()))
                     };
                     for (arg, expected_ty) in args.iter().zip(args_ty) {
                         let arg_ty = deduce_expr_ty(arg, arena, locals)?;
 
                         if !are_types_compatible(arg_ty, expected_ty) {
-                            panic!("incompatible types {:?} and {:?}", arg_ty, expected_ty);
+                            return Err(format!("incompatible types {:?} and {:?}", arg_ty, expected_ty));
                         }
                     }
 
@@ -177,15 +177,19 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
             Item::Expr { expr } => {
                 deduce_expr_ty(expr, arena, locals)?;
             }
-            Item::Function { name, args, ty, body } => {
+            Item::Function { name, args, ty, body, .. } => {
+                if ty.is_none() {
+                    *ty = Some(arena.alloc(TyS::Unit));
+                }
+
                 let func_ty = TyS::Function(
                     args.iter().map(|it| it.ty).collect(),
-                    ty.unwrap_or(arena.alloc(TyS::Unit)),
+                    ty.unwrap(),
                 );
                 let func_ty = arena.alloc(func_ty);
                 locals.insert(name.as_str(), func_ty);
                 for arg in args.iter() {
-                    dbg!("inserting", &arg.name, arg.ty);
+                    println!("Found arg {} of type {:?}", &arg.name, arg.ty);
                     locals.insert(arg.name.as_str(), arg.ty);
                 }
 

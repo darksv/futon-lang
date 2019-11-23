@@ -7,7 +7,7 @@ use crate::ty::{TyS, Ty};
 
 pub struct Parser<'lex, 'tcx> {
     peek: MultiPeek<Token<'lex>, Lexer<'lex>>,
-    ty: &'tcx Arena<TyS<'tcx>>
+    ty: &'tcx Arena<TyS<'tcx>>,
 }
 
 pub enum ParseError {
@@ -39,7 +39,7 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
     pub(crate) fn new(lex: Lexer<'lex>, arena: &'tcx Arena<TyS<'tcx>>) -> Parser<'lex, 'tcx> {
         Parser {
             peek: MultiPeek::new(lex),
-            ty: arena
+            ty: arena,
         }
     }
 
@@ -48,7 +48,8 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
         loop {
             let token = self.peek(0);
             let item = match token.get_type() {
-                TokenType::Keyword(Keyword::Fn) => self.parse_fn(),
+                TokenType::Keyword(Keyword::Extern) => self.parse_fn(true),
+                TokenType::Keyword(Keyword::Fn) => self.parse_fn(false),
                 TokenType::Keyword(Keyword::Struct) => self.parse_struct(),
                 TokenType::EndOfSource => break,
                 token_type => unimplemented!("{:?}", token_type),
@@ -66,7 +67,8 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
                 TokenType::Keyword(Keyword::Let) => self.parse_let(),
                 TokenType::Keyword(Keyword::Loop) => self.parse_loop(),
                 TokenType::Keyword(Keyword::For) => self.parse_for(),
-                TokenType::Keyword(Keyword::Fn) => self.parse_fn(),
+                TokenType::Keyword(Keyword::Extern) => self.parse_fn(true),
+                TokenType::Keyword(Keyword::Fn) => self.parse_fn(false),
                 TokenType::Keyword(Keyword::If) => self.parse_if(),
                 TokenType::Keyword(Keyword::Yield) => self.parse_yield(),
                 TokenType::Keyword(Keyword::Return) => self.parse_return(),
@@ -229,8 +231,8 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
                             } else {
                                 unimplemented!()
                             }
-                        },
-                        expr =>  Expression::Call(Box::new(expr), args)
+                        }
+                        expr => Expression::Call(Box::new(expr), args)
                     }
                 }
                 _ => break,
@@ -294,7 +296,10 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
         })
     }
 
-    fn parse_fn(&mut self) -> ParseResult<Item<'tcx>> {
+    fn parse_fn(&mut self, is_extern: bool) -> ParseResult<Item<'tcx>> {
+        if is_extern {
+            self.expect_keyword(Keyword::Extern)?;
+        }
         self.expect_keyword(Keyword::Fn)?;
         let identifier = self.expect_identifier()?.as_string();
         self.expect_one('(')?;
@@ -318,11 +323,19 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
             None
         };
 
-        self.expect_one('{')?;
-        let body = self.parse_stmts()?;
-        self.expect_one('}')?;
+        let body = if is_extern {
+            self.expect_one(';')?;
+            vec![]
+        } else {
+            self.expect_one('{')?;
+            let body = self.parse_stmts()?;
+            self.expect_one('}')?;
+            body
+        };
+
         Ok(Item::Function {
             name: identifier,
+            is_extern,
             args,
             body,
             ty,

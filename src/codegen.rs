@@ -124,6 +124,7 @@ fn genc_item<'a, 'tcx: 'a>(
                 }
             }
         }
+        Item::Function { is_extern: true, .. } => {}
         Item::Function {
             name,
             args,

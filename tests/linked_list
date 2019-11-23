@@ -3,7 +3,7 @@ struct Node {
     next: *Node
 }
 
-fn walk(head: *Node) -> () {
+fn walk(head: *Node {
     let curr: *Node = head;
     loop {
         if curr {

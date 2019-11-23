@@ -1,3 +1,5 @@
+extern fn print(a: i32);
+
 fn add(a: u32, b: u32) -> u32 {
     let c: u32 = a * b;
     let c2: u32 = a + b * c;

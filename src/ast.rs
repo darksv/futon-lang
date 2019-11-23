@@ -46,6 +46,7 @@ pub(crate) enum Item<'tcx> {
     },
     Function {
         name: String,
+        is_extern: bool,
         args: Vec<Argument<'tcx>>,
         ty: Option<Ty<'tcx>>,
         body: Vec<Item<'tcx>>,

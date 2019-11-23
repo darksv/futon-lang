@@ -30,6 +30,7 @@ keywords! {
     "let" => Let,
     "if" => If,
     "else" => Else,
+    "extern" => Extern,
     "for" => For,
     "while" => While,
     "loop" => Loop,
