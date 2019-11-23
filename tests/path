@@ -1,3 +1,0 @@
-fn foo() {
-    let e: u32 = a.b.c.d;
-}
