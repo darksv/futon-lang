@@ -137,8 +137,12 @@ fn deduce_expr_ty<'tcx>(
             let _to_ty = deduce_expr_ty(to, arena, locals)?;
             arena.alloc(TyS::Range)
         }
-        e => {
-            unimplemented!("{:?}", e);
+        Expression::Tuple(values) => {
+            let types: Result<Vec<_>, _> = values
+                .iter()
+                .map(|v| deduce_expr_ty(v, arena, locals))
+                .collect();
+            arena.alloc(TyS::Tuple(types?))
         }
     })
 }
