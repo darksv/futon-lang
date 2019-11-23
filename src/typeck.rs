@@ -149,7 +149,7 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
     items: &'ast mut [Item<'tcx>],
     arena: &'tcx Arena<TyS<'tcx>>,
     locals: &mut HashMap<&'ast str, Ty<'tcx>>,
-    expected_ret_ty: Option<Ty<'tcx>>
+    expected_ret_ty: Option<Ty<'tcx>>,
 ) -> Result<(), String> {
     for item in items.iter_mut() {
         match item {
@@ -201,9 +201,16 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
             Item::Struct { .. } => {
                 log::debug!("ifnore struct");
             }
-            Item::If { condition, arm_true: _, arm_false: _ } => {
+            Item::If { condition, arm_true, arm_false } => {
                 let cond_ty = deduce_expr_ty(condition, arena, &locals)?;
-                assert!(are_types_compatible(cond_ty, arena.alloc(TyS::Bool)));
+                if !are_types_compatible(cond_ty, arena.alloc(TyS::Bool)) {
+                    return Err(format!("only boolean expressions are allowed in if conditions"));
+                }
+
+                infer_types(arm_true, arena, locals, expected_ret_ty)?;
+                if let Some(arm_false) = arm_false {
+                    infer_types(arm_false, arena, locals, expected_ret_ty)?;
+                }
             }
             Item::ForIn { name, expr, body } => {
                 let ty = deduce_expr_ty(expr, arena, locals)?;

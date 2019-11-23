@@ -468,10 +468,15 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
         let arm_true = self.parse_stmts()?;
         self.expect_one('}')?;
         let arm_false = if self.match_keyword(Keyword::Else).is_some() {
-            self.expect_one('{')?;
-            let false_arm = self.parse_stmts()?;
-            self.expect_one('}')?;
-            Some(false_arm)
+            if self.peek(0).get_type() == TokenType::Keyword(Keyword::If) {
+                let item = self.parse_if()?;
+                Some(vec![item])
+            } else {
+                self.expect_one('{')?;
+                let false_arm = self.parse_stmts()?;
+                self.expect_one('}')?;
+                Some(false_arm)
+            }
         } else {
             None
         };
