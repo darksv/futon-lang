@@ -1,8 +1,7 @@
 use crate::ast::{Expression, Item, Operator};
+use crate::ty::{Ty, TyS};
 use std::borrow::{Borrow, Cow};
 use std::collections::{HashMap, HashSet};
-use crate::ty::{Ty, TyS};
-
 
 struct VariableHolder<'tcx> {
     variables: HashMap<String, Vec<(Ty<'tcx>, Option<Expression>)>>,
@@ -15,7 +14,12 @@ impl<'tcx> VariableHolder<'tcx> {
         }
     }
 
-    fn def<T: Into<String> + Borrow<str>>(&mut self, name: T, ty: Ty<'tcx>, val: Option<Expression>) {
+    fn def<T: Into<String> + Borrow<str>>(
+        &mut self,
+        name: T,
+        ty: Ty<'tcx>,
+        val: Option<Expression>,
+    ) {
         self.variables
             .entry(name.into())
             .or_insert_with(Vec::new)
@@ -31,11 +35,13 @@ impl<'tcx> VariableHolder<'tcx> {
         }
     }
 
-    fn get<T: Into<String> + Borrow<str>>(&mut self, name: T) -> Option<&(Ty<'tcx>, Option<Expression>)> {
+    fn get<T: Into<String> + Borrow<str>>(
+        &mut self,
+        name: T,
+    ) -> Option<&(Ty<'tcx>, Option<Expression>)> {
         self.variables.get(name.borrow()).and_then(|it| it.last())
     }
 }
-
 
 pub(crate) struct SourceBuilder {
     buffer: String,
@@ -63,7 +69,8 @@ impl SourceBuilder {
 
     fn maybe_indent(&mut self) {
         if !self.indented {
-            self.buffer.push_str(&format!("{:width$}", "", width = self.level * 2));
+            self.buffer
+                .push_str(&format!("{:width$}", "", width = self.level * 2));
             self.indented = true;
         }
     }
@@ -102,28 +109,39 @@ fn genc_item<'a, 'tcx: 'a>(
 ) {
     match item {
         Item::Let { name, ty, expr, .. } => {
-            ensure_ty_emitted(fmt, emitted_tys, ty.expect(&format!("no type for {}", name)));
-            fmt.writeln(&format!("{} {} = {};",
-                                 format_ty(ty.unwrap()),
-                                 name,
-                                 format_expr(expr.as_ref().unwrap())));
+            ensure_ty_emitted(
+                fmt,
+                emitted_tys,
+                ty.expect(&format!("no type for {}", name)),
+            );
+            fmt.writeln(&format!(
+                "{} {} = {};",
+                format_ty(ty.unwrap()),
+                name,
+                format_expr(expr.as_ref().unwrap())
+            ));
             vars.def(name.clone(), ty.clone().unwrap(), expr.clone());
         }
         Item::Assignment {
             lhs,
             operator,
             expr,
-        } => {
-            match operator {
-                Some(op) => {
-                    fmt.writeln(&format!("{} {}= {};", format_expr(lhs), format_operator(op), format_expr(expr)));
-                }
-                None => {
-                    fmt.writeln(&format!("{} = {};", format_expr(lhs), format_expr(expr)));
-                }
+        } => match operator {
+            Some(op) => {
+                fmt.writeln(&format!(
+                    "{} {}= {};",
+                    format_expr(lhs),
+                    format_operator(op),
+                    format_expr(expr)
+                ));
             }
-        }
-        Item::Function { is_extern: true, .. } => {}
+            None => {
+                fmt.writeln(&format!("{} = {};", format_expr(lhs), format_expr(expr)));
+            }
+        },
+        Item::Function {
+            is_extern: true, ..
+        } => {}
         Item::Function {
             name,
             args,
@@ -224,7 +242,10 @@ fn genc_item<'a, 'tcx: 'a>(
                 fmt.writeln("}");
             }
             Expression::Range(to, None) => {
-                fmt.writeln(&format!("for (int64_t i = 0; i < {}; ++i) {{", format_expr(to)));
+                fmt.writeln(&format!(
+                    "for (int64_t i = 0; i < {}; ++i) {{",
+                    format_expr(to)
+                ));
                 fmt.shift();
                 for item in body {
                     genc_item(fmt, item, vars, emitted_tys);
@@ -257,11 +278,7 @@ fn genc_item<'a, 'tcx: 'a>(
     }
 }
 
-fn ensure_ty_emitted<'tcx>(
-    fmt: &mut SourceBuilder,
-    emitted: &mut HashSet<Ty<'tcx>>,
-    ty: Ty<'tcx>,
-) {
+fn ensure_ty_emitted<'tcx>(fmt: &mut SourceBuilder, emitted: &mut HashSet<Ty<'tcx>>, ty: Ty<'tcx>) {
     if emitted.contains(ty) {
         return;
     }
@@ -311,7 +328,7 @@ fn format_ty(ty: Ty) -> Cow<str> {
         TyS::Function(..) => Cow::Borrowed("void*"),
         TyS::Pointer(inner) => Cow::Owned(format!("{}*", format_ty(inner))),
         TyS::Bool => Cow::Borrowed("bool"),
-        TyS::Range => Cow::Borrowed("/* generated */")
+        TyS::Range => Cow::Borrowed("/* generated */"),
     }
 }
 
@@ -321,7 +338,7 @@ fn format_operator(op: &Operator) -> Cow<'static, str> {
         Operator::Sub => Cow::Borrowed("-"),
         Operator::Mul => Cow::Borrowed("*"),
         Operator::Div => Cow::Borrowed("/"),
-        Operator::Equal =>  Cow::Borrowed("=="),
+        Operator::Equal => Cow::Borrowed("=="),
         Operator::NotEqual => Cow::Borrowed("!="),
         Operator::Less => Cow::Borrowed("<"),
         Operator::Greater => Cow::Borrowed(">"),
@@ -376,16 +393,16 @@ fn format_expr(ty: &Expression) -> Cow<str> {
         Expression::Tuple(_) => Cow::Borrowed("/* generated */"),
         Expression::Bool(value) => Cow::Borrowed(if *value { "true" } else { "false" }),
         place @ Expression::Place(_, _) => format_place(place),
-        Expression::Range(_, _) => Cow::Borrowed("/* range */")
+        Expression::Range(_, _) => Cow::Borrowed("/* range */"),
     }
 }
 
 fn format_place(place: &Expression) -> Cow<'_, str> {
     match place {
         Expression::Identifier(name) => Cow::Borrowed(name),
-        Expression::Place(base, path) => Cow::Owned(
-            format!("{}.{}", format_place(base), format_place(path))
-        ),
-        _ => unimplemented!()
+        Expression::Place(base, path) => {
+            Cow::Owned(format!("{}.{}", format_place(base), format_place(path)))
+        }
+        _ => unimplemented!(),
     }
 }

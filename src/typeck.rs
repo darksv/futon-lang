@@ -1,7 +1,7 @@
-use std::collections::HashMap;
-use crate::ast::{Item, Expression, Operator};
 use crate::arena::Arena;
-use crate::ty::{TyS, Ty};
+use crate::ast::{Expression, Item, Operator};
+use crate::ty::{Ty, TyS};
+use std::collections::HashMap;
 
 fn is_compatible_to(ty: Ty<'_>, subty: Ty<'_>) -> bool {
     match (ty, subty) {
@@ -18,9 +18,9 @@ fn is_compatible_to(ty: Ty<'_>, subty: Ty<'_>) -> bool {
         (TyS::Tuple(ty1), TyS::Tuple(ty2)) => {
             ty1.len() == ty2.len()
                 && ty1
-                .iter()
-                .zip(ty2.iter())
-                .all(|(ty1, ty2)| is_compatible_to(ty1, ty2))
+                    .iter()
+                    .zip(ty2.iter())
+                    .all(|(ty1, ty2)| is_compatible_to(ty1, ty2))
         }
         (TyS::Function(args1, ret1), TyS::Function(args2, ret2)) => {
             if args1.len() != args2.len() {
@@ -60,23 +60,18 @@ fn deduce_expr_ty<'tcx>(
             }
 
             match op {
-                | Operator::Less
+                Operator::Less
                 | Operator::LessEqual
                 | Operator::Greater
                 | Operator::GreaterEqual
                 | Operator::Equal
                 | Operator::NotEqual => return Ok(arena.alloc(TyS::Bool)),
-                | Operator::Add
-                | Operator::Sub
-                | Operator::Mul
-                | Operator::Div => return Ok(lhs_ty),
-                | Operator::Negate => unimplemented!(),
-                | Operator::Deref => unimplemented!(),
+                Operator::Add | Operator::Sub | Operator::Mul | Operator::Div => return Ok(lhs_ty),
+                Operator::Negate => unimplemented!(),
+                Operator::Deref => unimplemented!(),
             }
         }
-        Expression::Prefix(_op, expr) => {
-            deduce_expr_ty(expr, arena, &locals)?
-        }
+        Expression::Prefix(_op, expr) => deduce_expr_ty(expr, arena, &locals)?,
         Expression::Identifier(ident) => {
             if let Some(ty) = locals.get(ident.as_str()) {
                 ty
@@ -103,27 +98,30 @@ fn deduce_expr_ty<'tcx>(
 
             arena.alloc(TyS::Array(items.len(), first))
         }
-        Expression::Call(callee, args) => {
-            match callee.as_ref() {
-                Expression::Identifier(ident) => {
-                    let callee = locals.get(ident.as_str()).expect(&format!("a type for {}", ident.as_str()));
-                    let (args_ty, ret_ty) = match callee {
-                        TyS::Function(args_ty, ret_ty) => (args_ty, ret_ty),
-                        _ => return Err(format!("{} is not callable", ident.as_str()))
-                    };
-                    for (arg, expected_ty) in args.iter().zip(args_ty) {
-                        let arg_ty = deduce_expr_ty(arg, arena, locals)?;
+        Expression::Call(callee, args) => match callee.as_ref() {
+            Expression::Identifier(ident) => {
+                let callee = locals
+                    .get(ident.as_str())
+                    .expect(&format!("a type for {}", ident.as_str()));
+                let (args_ty, ret_ty) = match callee {
+                    TyS::Function(args_ty, ret_ty) => (args_ty, ret_ty),
+                    _ => return Err(format!("{} is not callable", ident.as_str())),
+                };
+                for (arg, expected_ty) in args.iter().zip(args_ty) {
+                    let arg_ty = deduce_expr_ty(arg, arena, locals)?;
 
-                        if !is_compatible_to(arg_ty, expected_ty) {
-                            return Err(format!("incompatible types {:?} and {:?}", arg_ty, expected_ty));
-                        }
+                    if !is_compatible_to(arg_ty, expected_ty) {
+                        return Err(format!(
+                            "incompatible types {:?} and {:?}",
+                            arg_ty, expected_ty
+                        ));
                     }
-
-                    ret_ty
                 }
-                expr => unimplemented!("{:?}", expr),
+
+                ret_ty
             }
-        }
+            expr => unimplemented!("{:?}", expr),
+        },
         Expression::Range(from, Some(to)) => {
             let from_ty = deduce_expr_ty(from, arena, locals)?;
             let to_ty = deduce_expr_ty(to, arena, locals)?;
@@ -156,7 +154,9 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
         match item {
             Item::Let { name, ty, expr } => {
                 if expr.is_none() {
-                    return Err(format!("no expression on the right hand side of the let binding"));
+                    return Err(format!(
+                        "no expression on the right hand side of the let binding"
+                    ));
                 }
                 let expr = expr.as_ref().unwrap();
                 let expr_ty = deduce_expr_ty(expr, arena, &locals)?;
@@ -164,7 +164,10 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
                 let ty = match ty {
                     Some(ty) => {
                         if !is_compatible_to(ty, expr_ty) {
-                            return Err(format!("mismatched types. expected {:?}, got {:?}", ty, expr_ty));
+                            return Err(format!(
+                                "mismatched types. expected {:?}, got {:?}",
+                                ty, expr_ty
+                            ));
                         }
                         ty
                     }
@@ -175,25 +178,35 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
                 };
                 locals.insert(name, ty);
             }
-            Item::Assignment { lhs, operator: _, expr } => {
+            Item::Assignment {
+                lhs,
+                operator: _,
+                expr,
+            } => {
                 let lhs_ty = deduce_expr_ty(lhs, arena, &locals)?;
                 let rhs_ty = deduce_expr_ty(expr, arena, &locals)?;
 
                 if !is_compatible_to(lhs_ty, rhs_ty) {
-                    return Err(format!("incompatible types in assignment, got {:?} and {:?}", lhs_ty, rhs_ty));
+                    return Err(format!(
+                        "incompatible types in assignment, got {:?} and {:?}",
+                        lhs_ty, rhs_ty
+                    ));
                 }
             }
             Item::Expr { expr } => {
                 deduce_expr_ty(expr, arena, locals)?;
             }
-            Item::Function { name, args, ty, body, .. } => {
+            Item::Function {
+                name,
+                args,
+                ty,
+                body,
+                ..
+            } => {
                 if ty.is_none() {
                     *ty = Some(arena.alloc(TyS::Unit));
                 }
-                let func_ty = TyS::Function(
-                    args.iter().map(|it| it.ty).collect(),
-                    ty.unwrap(),
-                );
+                let func_ty = TyS::Function(args.iter().map(|it| it.ty).collect(), ty.unwrap());
                 let func_ty = arena.alloc(func_ty);
                 locals.insert(name.as_str(), func_ty);
                 for arg in args {
@@ -206,10 +219,16 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
             Item::Struct { .. } => {
                 log::debug!("ifnore struct");
             }
-            Item::If { condition, arm_true, arm_false } => {
+            Item::If {
+                condition,
+                arm_true,
+                arm_false,
+            } => {
                 let cond_ty = deduce_expr_ty(condition, arena, &locals)?;
                 if !is_compatible_to(cond_ty, arena.alloc(TyS::Bool)) {
-                    return Err(format!("only boolean expressions are allowed in if conditions"));
+                    return Err(format!(
+                        "only boolean expressions are allowed in if conditions"
+                    ));
                 }
                 infer_types(arm_true, arena, locals, expected_ret_ty)?;
                 if let Some(arm_false) = arm_false {
@@ -238,13 +257,16 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
                 }
                 let ty = deduce_expr_ty(expr, arena, locals)?;
                 if !is_compatible_to(ty, expected_ret_ty.unwrap()) {
-                    return Err(format!("function marked as returning {:?} but returned {:?}", expected_ret_ty.unwrap(), ty));
+                    return Err(format!(
+                        "function marked as returning {:?} but returned {:?}",
+                        expected_ret_ty.unwrap(),
+                        ty
+                    ));
                 }
             }
             Item::Break => {}
-            Item::Yield(_) => unimplemented!()
+            Item::Yield(_) => unimplemented!(),
         }
     }
     Ok(())
 }
-

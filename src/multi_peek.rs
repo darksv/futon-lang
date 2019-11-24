@@ -1,11 +1,11 @@
-pub(crate) struct MultiPeek<T, I: Iterator<Item=T>> {
+pub(crate) struct MultiPeek<T, I: Iterator<Item = T>> {
     peeked: [Option<T>; 2],
     index: usize,
     length: usize,
     input: I,
 }
 
-impl<T, I: Iterator<Item=T>> MultiPeek<T, I> {
+impl<T, I: Iterator<Item = T>> MultiPeek<T, I> {
     pub(crate) fn new(input: I) -> Self {
         MultiPeek {
             peeked: [None, None],

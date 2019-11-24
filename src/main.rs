@@ -7,14 +7,14 @@ mod parser;
 mod ty;
 mod typeck;
 
+use crate::arena::Arena;
+use crate::typeck::infer_types;
+use codegen::SourceBuilder;
 use lexer::{Keyword, Lexer, PunctKind, Token, TokenType};
 use parser::Parser;
-use codegen::SourceBuilder;
-use crate::arena::Arena;
-use std::path::Path;
-use std::env;
-use crate::typeck::infer_types;
 use std::collections::HashMap;
+use std::env;
+use std::path::Path;
 
 fn main() {
     env_logger::init();
@@ -56,7 +56,6 @@ fn compile_file(path: impl AsRef<Path>) {
                     println!("typeck error: {}", e);
                 }
             }
-
         }
         Err(e) => println!("{:?}", e),
     }

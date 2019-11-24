@@ -17,7 +17,7 @@ impl<T> Default for Arena<T> {
             blocks: RefCell::new(Blocks {
                 current: Vec::with_capacity(BLOCK_SIZE),
                 rest: vec![],
-            })
+            }),
         }
     }
 }
@@ -26,10 +26,7 @@ impl<T> Arena<T> {
     pub fn alloc(&self, value: T) -> &T {
         let mut blocks = self.blocks.borrow_mut();
         if blocks.current.len() == BLOCK_SIZE {
-            let block = std::mem::replace(
-                &mut blocks.current,
-                Vec::with_capacity(BLOCK_SIZE),
-            );
+            let block = std::mem::replace(&mut blocks.current, Vec::with_capacity(BLOCK_SIZE));
             blocks.rest.push(block);
         }
 
@@ -45,11 +42,14 @@ impl<T> Arena<T> {
     }
 
     pub fn find(&self, other: &T) -> Option<&T>
-        where
-            T: Eq
+    where
+        T: Eq,
     {
         let blocks = self.blocks.borrow();
-        blocks.current.iter().chain(blocks.rest.iter().flatten())
+        blocks
+            .current
+            .iter()
+            .chain(blocks.rest.iter().flatten())
             .find(|it| *it == other)
             .map(|it| unsafe {
                 // It is safe because:
@@ -59,4 +59,3 @@ impl<T> Arena<T> {
             })
     }
 }
-

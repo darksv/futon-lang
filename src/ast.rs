@@ -1,6 +1,5 @@
 use crate::ty::Ty;
 
-
 #[derive(Debug)]
 pub(crate) struct Argument<'tcx> {
     pub name: String,
@@ -41,7 +40,7 @@ pub(crate) enum Expression {
     Array(Vec<Expression>),
     Tuple(Vec<Expression>),
     Call(Box<Expression>, Vec<Expression>),
-    Range(Box<Expression>, Option<Box<Expression>>)
+    Range(Box<Expression>, Option<Box<Expression>>),
 }
 
 #[derive(Debug)]

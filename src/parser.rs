@@ -1,9 +1,9 @@
-use std::fmt;
 use super::{Keyword, Lexer, PunctKind, Token, TokenType};
-use crate::ast::{Argument, Expression, Item, Field, Operator};
-use crate::multi_peek::MultiPeek;
 use crate::arena::Arena;
-use crate::ty::{TyS, Ty};
+use crate::ast::{Argument, Expression, Field, Item, Operator};
+use crate::multi_peek::MultiPeek;
+use crate::ty::{Ty, TyS};
+use std::fmt;
 
 pub struct Parser<'lex, 'tcx> {
     peek: MultiPeek<Token<'lex>, Lexer<'lex>>,
@@ -31,7 +31,6 @@ impl fmt::Debug for ParseError {
         Ok(())
     }
 }
-
 
 type ParseResult<T> = Result<T, ParseError>;
 
@@ -110,9 +109,7 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
                 expr: self.parse_expr(0)?,
             }
         } else {
-            Item::Expr {
-                expr: lhs
-            }
+            Item::Expr { expr: lhs }
         };
         self.expect_one(';')?;
         Ok(item)
@@ -168,7 +165,7 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
                 self.expect_one(')')?;
                 match values.len() {
                     1 => values.into_iter().next().unwrap(),
-                    _ => Expression::Tuple(values)
+                    _ => Expression::Tuple(values),
                 }
             }
             TokenType::Punct('[') => {
@@ -200,7 +197,7 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
             }
 
             expr = match token.get_type() {
-                | TokenType::Punct('+')
+                TokenType::Punct('+')
                 | TokenType::Punct('-')
                 | TokenType::Punct('*')
                 | TokenType::Punct('/') => {
@@ -213,18 +210,18 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
                         TokenType::Punct('-') => Operator::Sub,
                         TokenType::Punct('*') => Operator::Mul,
                         TokenType::Punct('/') => Operator::Div,
-                        _ => unreachable!()
+                        _ => unreachable!(),
                     };
 
                     let rhs = self.parse_expr(new_precedence)?;
                     Expression::Infix(op, Box::new(expr), Box::new(rhs))
                 }
-                | TokenType::Punct('.') => {
+                TokenType::Punct('.') => {
                     self.advance();
                     let rhs = self.parse_expr(new_precedence)?;
                     Expression::Place(Box::new(expr), Box::new(rhs))
                 }
-                | TokenType::Punct('<')
+                TokenType::Punct('<')
                 | TokenType::Punct('>')
                 | TokenType::Punct('!')
                 | TokenType::Punct('=') => {
@@ -237,18 +234,22 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
                     let op = match (first.get_type(), second.get_type(), is_joint) {
                         (TokenType::Punct('<'), TokenType::Punct('='), true) => Operator::LessEqual,
                         (TokenType::Punct('<'), TokenType::Punct('>'), true) => Operator::NotEqual,
-                        (TokenType::Punct('>'), TokenType::Punct('='), true) => Operator::GreaterEqual,
+                        (TokenType::Punct('>'), TokenType::Punct('='), true) => {
+                            Operator::GreaterEqual
+                        }
                         (TokenType::Punct('<'), _, _) => Operator::Less,
                         (TokenType::Punct('>'), _, _) => Operator::Greater,
                         (TokenType::Punct('='), TokenType::Punct('='), true) => Operator::Equal,
                         (TokenType::Punct('!'), TokenType::Punct('='), true) => Operator::NotEqual,
                         (TokenType::Punct('='), _, _) => return Ok(Some(expr)),
-                        _ => return Err(ParseError::UnexpectedToken(
-                            second.get_type(),
-                            second.line(),
-                            second.column(),
-                            None,
-                        )),
+                        _ => {
+                            return Err(ParseError::UnexpectedToken(
+                                second.get_type(),
+                                second.line(),
+                                second.column(),
+                                None,
+                            ))
+                        }
                     };
                     if let Operator::Less | Operator::Greater = op {
                         self.advance();
@@ -259,7 +260,7 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
                     let rhs = self.parse_expr(new_precedence)?;
                     Expression::Infix(op, Box::new(expr), Box::new(rhs))
                 }
-                | TokenType::Punct('(') => {
+                TokenType::Punct('(') => {
                     self.advance();
                     let args = self.parse_comma_separated_exprs()?;
                     self.expect_one(')')?;
@@ -486,9 +487,7 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
         self.expect_one('{')?;
         let items = self.parse_stmts()?;
         self.expect_one('}')?;
-        Ok(Item::Loop {
-            body: items,
-        })
+        Ok(Item::Loop { body: items })
     }
 
     fn parse_if(&mut self) -> ParseResult<Item<'tcx>> {
