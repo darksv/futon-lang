@@ -137,6 +137,11 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
                 let operand = self.parse_expr(10)?;
                 Expression::Prefix(op, Box::new(operand))
             }
+            TokenType::Keyword(Keyword::Range) => {
+                self.advance();
+                let operand = self.parse_expr(10)?;
+                Expression::Range(Box::new(operand), None)
+            }
             TokenType::Identifier => {
                 self.advance();
                 Expression::Identifier(token.as_string())
@@ -257,24 +262,7 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
                     self.advance();
                     let args = self.parse_comma_separated_exprs()?;
                     self.expect_one(')')?;
-
-                    // FIXME
-                    match expr {
-                        Expression::Identifier(ident) if ident == "range" => {
-                            if args.len() == 1 {
-                                let a = args.into_iter().next().unwrap();
-                                Expression::Range(Box::new(a), None)
-                            } else if args.len() == 2 {
-                                let mut iter = args.into_iter();
-                                let a = iter.next().unwrap();
-                                let b = iter.next().unwrap();
-                                Expression::Range(Box::new(a), Some(Box::new(b)))
-                            } else {
-                                unimplemented!()
-                            }
-                        }
-                        expr => Expression::Call(Box::new(expr), args)
-                    }
+                    Expression::Call(Box::new(expr), args)
                 }
                 _ => break,
             };

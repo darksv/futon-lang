@@ -37,6 +37,7 @@ keywords! {
     "fn" => Fn,
     "struct" => Struct,
     "yield" => Yield,
+    "range" => Range,
     "return" => Return,
     "break" => Break,
     "true" => True,
