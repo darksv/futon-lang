@@ -154,28 +154,33 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
     for item in items.iter_mut() {
         match item {
             Item::Let { name, ty, expr } => {
+                if expr.is_none() {
+                    return Err(format!("no expression on the right hand side of the let binding"));
+                }
                 let expr = expr.as_ref().unwrap();
-
-                let deduced_type = deduce_expr_ty(expr, arena, &locals)?;
-                log::debug!("deduced type {:?} for binding {}", deduced_type, name);
-
-                match ty {
+                let expr_ty = deduce_expr_ty(expr, arena, &locals)?;
+                log::debug!("deduced type {:?} for binding {}", expr_ty, name);
+                let ty = match ty {
                     Some(ty) => {
-                        if !are_types_compatible(ty, deduced_type) {
-                            return Err(format!("mismatched types. expected {:?}, got {:?}", ty, deduced_type));
+                        if !are_types_compatible(ty, expr_ty) {
+                            return Err(format!("mismatched types. expected {:?}, got {:?}", ty, expr_ty));
                         }
+                        ty
                     }
                     None => {
-                        *ty = Some(deduced_type);
+                        *ty = Some(expr_ty);
+                        expr_ty
                     }
-                }
-                locals.insert(name, ty.expect("has type"));
+                };
+                locals.insert(name, ty);
             }
             Item::Assignment { lhs, operator: _, expr } => {
-                let lhs_expr = deduce_expr_ty(lhs, arena, &locals)?;
-                let rhs_expr = deduce_expr_ty(expr, arena, &locals)?;
+                let lhs_ty = deduce_expr_ty(lhs, arena, &locals)?;
+                let rhs_ty = deduce_expr_ty(expr, arena, &locals)?;
 
-                assert!(are_types_compatible(lhs_expr, rhs_expr));
+                if !are_types_compatible(lhs_ty, rhs_ty) {
+                    return Err(format!("incompatible types in assignment, got {:?} and {:?}", lhs_ty, rhs_ty));
+                }
             }
             Item::Expr { expr } => {
                 deduce_expr_ty(expr, arena, locals)?;
@@ -184,14 +189,13 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
                 if ty.is_none() {
                     *ty = Some(arena.alloc(TyS::Unit));
                 }
-
                 let func_ty = TyS::Function(
                     args.iter().map(|it| it.ty).collect(),
                     ty.unwrap(),
                 );
                 let func_ty = arena.alloc(func_ty);
                 locals.insert(name.as_str(), func_ty);
-                for arg in args.iter() {
+                for arg in args {
                     log::debug!("Found arg {} of type {:?}", &arg.name, arg.ty);
                     locals.insert(arg.name.as_str(), arg.ty);
                 }
@@ -206,7 +210,6 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
                 if !are_types_compatible(cond_ty, arena.alloc(TyS::Bool)) {
                     return Err(format!("only boolean expressions are allowed in if conditions"));
                 }
-
                 infer_types(arm_true, arena, locals, expected_ret_ty)?;
                 if let Some(arm_false) = arm_false {
                     infer_types(arm_false, arena, locals, expected_ret_ty)?;
@@ -219,12 +222,14 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
                     TyS::Range => true,
                     _ => false,
                 };
-                assert!(is_iterable);
+                if !is_iterable {
+                    return Err(format!("{:?} is not iterable", ty));
+                }
                 locals.insert(name.as_str(), arena.alloc(TyS::I32));
                 infer_types(body, arena, locals, expected_ret_ty)?;
             }
-            Item::Loop { .. } => {
-                log::debug!("ifnore loop");
+            Item::Loop { body } => {
+                infer_types(body, arena, locals, expected_ret_ty)?;
             }
             Item::Return(expr) => {
                 if expected_ret_ty.is_none() {
@@ -235,9 +240,8 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
                     return Err(format!("function marked as returning {:?} but returned {:?}", expected_ret_ty.unwrap(), ty));
                 }
             }
-            other => {
-                unimplemented!("cant typeck {:?}", &other);
-            }
+            Item::Break => {}
+            Item::Yield(_) => unimplemented!()
         }
     }
     Ok(())
