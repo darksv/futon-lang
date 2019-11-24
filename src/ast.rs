@@ -19,6 +19,8 @@ pub(crate) enum Operator {
     Sub,
     Mul,
     Div,
+    Equal,
+    NotEqual,
     Less,
     LessEqual,
     Greater,

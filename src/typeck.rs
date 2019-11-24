@@ -62,12 +62,15 @@ fn deduce_expr_ty<'tcx>(
                 | Operator::Less
                 | Operator::LessEqual
                 | Operator::Greater
-                | Operator::GreaterEqual => return Ok(arena.alloc(TyS::Bool)),
+                | Operator::GreaterEqual
+                | Operator::Equal
+                | Operator::NotEqual => return Ok(arena.alloc(TyS::Bool)),
                 | Operator::Add
                 | Operator::Sub
                 | Operator::Mul
                 | Operator::Div => return Ok(lhs_ty),
-                _ => unreachable!()
+                | Operator::Negate => unimplemented!(),
+                | Operator::Deref => unimplemented!(),
             }
         }
         Expression::Prefix(_op, expr) => {

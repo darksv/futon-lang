@@ -194,14 +194,8 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
                 break;
             }
 
-            let is_joint = match token.get_punct() {
-                Some((_, PunctKind::Joint)) => Some(true),
-                Some((_, PunctKind::Single)) => Some(false),
-                None => None,
-            };
-
             expr = match token.get_type() {
-                TokenType::Punct('+')
+                | TokenType::Punct('+')
                 | TokenType::Punct('-')
                 | TokenType::Punct('*')
                 | TokenType::Punct('/') => {
@@ -220,31 +214,46 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
                     let rhs = self.parse_expr(new_precedence)?;
                     Expression::Infix(op, Box::new(expr), Box::new(rhs))
                 }
-                TokenType::Punct('.') => {
+                | TokenType::Punct('.') => {
                     self.advance();
                     let rhs = self.parse_expr(new_precedence)?;
                     Expression::Place(Box::new(expr), Box::new(rhs))
                 }
-                TokenType::Punct('<') | TokenType::Punct('>') => {
-                    let op = self.advance();
-                    let op = if self.peek(0).get_type() == TokenType::Punct('=') && is_joint == Some(true) {
-                        self.advance();
-                        match op.get_type() {
-                            TokenType::Punct('<') => Operator::LessEqual,
-                            TokenType::Punct('>') => Operator::GreaterEqual,
-                            _ => unreachable!()
-                        }
-                    } else {
-                        match op.get_type() {
-                            TokenType::Punct('<') => Operator::Less,
-                            TokenType::Punct('>') => Operator::Greater,
-                            _ => unreachable!()
-                        }
+                | TokenType::Punct('<')
+                | TokenType::Punct('>')
+                | TokenType::Punct('!')
+                | TokenType::Punct('=') => {
+                    let first = self.peek(0);
+                    let second = self.peek(1);
+                    let is_joint = match first.get_punct() {
+                        Some((_, PunctKind::Joint)) => true,
+                        _ => false,
                     };
+                    let op = match (first.get_type(), second.get_type(), is_joint) {
+                        (TokenType::Punct('<'), TokenType::Punct('='), true) => Operator::LessEqual,
+                        (TokenType::Punct('<'), TokenType::Punct('>'), true) => Operator::NotEqual,
+                        (TokenType::Punct('>'), TokenType::Punct('='), true) => Operator::GreaterEqual,
+                        (TokenType::Punct('<'), _, _) => Operator::Less,
+                        (TokenType::Punct('>'), _, _) => Operator::Greater,
+                        (TokenType::Punct('='), TokenType::Punct('='), true) => Operator::Equal,
+                        (TokenType::Punct('!'), TokenType::Punct('='), true) => Operator::NotEqual,
+                        _ => return Err(ParseError::UnexpectedToken(
+                            second.get_type(),
+                            second.line(),
+                            second.column(),
+                            None,
+                        )),
+                    };
+                    if let Operator::Less | Operator::Greater = op {
+                        self.advance();
+                    } else {
+                        self.advance();
+                        self.advance();
+                    }
                     let rhs = self.parse_expr(new_precedence)?;
                     Expression::Infix(op, Box::new(expr), Box::new(rhs))
                 }
-                TokenType::Punct('(') => {
+                | TokenType::Punct('(') => {
                     self.advance();
                     let args = self.parse_comma_separated_exprs()?;
                     self.expect_one(')')?;

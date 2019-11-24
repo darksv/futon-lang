@@ -321,6 +321,8 @@ fn format_operator(op: &Operator) -> Cow<'static, str> {
         Operator::Sub => Cow::Borrowed("-"),
         Operator::Mul => Cow::Borrowed("*"),
         Operator::Div => Cow::Borrowed("/"),
+        Operator::Equal =>  Cow::Borrowed("=="),
+        Operator::NotEqual => Cow::Borrowed("!="),
         Operator::Less => Cow::Borrowed("<"),
         Operator::Greater => Cow::Borrowed(">"),
         Operator::LessEqual => Cow::Borrowed("<="),
