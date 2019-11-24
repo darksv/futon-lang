@@ -3,39 +3,40 @@ use crate::ast::{Item, Expression, Operator};
 use crate::arena::Arena;
 use crate::ty::{TyS, Ty};
 
-fn are_types_compatible(a: Ty<'_>, b: Ty<'_>) -> bool {
-    match (a, b) {
+fn is_compatible_to(ty: Ty<'_>, subty: Ty<'_>) -> bool {
+    match (ty, subty) {
         (TyS::Bool, TyS::Bool) => true,
         (TyS::U32, TyS::U32) => true,
         (TyS::I32, TyS::I32) => true,
         (TyS::F32, TyS::F32) => true,
         (TyS::Array(len1, ty1), TyS::Array(len2, ty2)) => {
-            len1 == len2 && are_types_compatible(ty1, ty2)
+            len1 == len2 && is_compatible_to(ty1, ty2)
         }
-        (TyS::Slice(ty1), TyS::Slice(ty2)) => are_types_compatible(ty1, ty2),
+        (TyS::Array(_, ty1), TyS::Slice(ty2)) => is_compatible_to(ty1, ty2),
+        (TyS::Slice(ty1), TyS::Slice(ty2)) => is_compatible_to(ty1, ty2),
         (TyS::Unit, TyS::Unit) => true,
         (TyS::Tuple(ty1), TyS::Tuple(ty2)) => {
             ty1.len() == ty2.len()
                 && ty1
                 .iter()
                 .zip(ty2.iter())
-                .all(|(ty1, ty2)| are_types_compatible(ty1, ty2))
+                .all(|(ty1, ty2)| is_compatible_to(ty1, ty2))
         }
         (TyS::Function(args1, ret1), TyS::Function(args2, ret2)) => {
             if args1.len() != args2.len() {
                 return false;
             }
 
-            if !are_types_compatible(ret1, ret2) {
+            if !is_compatible_to(ret1, ret2) {
                 return false;
             }
 
             args1
                 .iter()
                 .zip(args2.iter())
-                .all(|(ty1, ty2)| are_types_compatible(ty1, ty2))
+                .all(|(ty1, ty2)| is_compatible_to(ty1, ty2))
         }
-        (TyS::Pointer(ty1), TyS::Pointer(ty2)) => are_types_compatible(ty1, ty2),
+        (TyS::Pointer(ty1), TyS::Pointer(ty2)) => is_compatible_to(ty1, ty2),
         (TyS::Other(name1), TyS::Other(name2)) => name1 == name2,
         _ => false,
     }
@@ -54,7 +55,7 @@ fn deduce_expr_ty<'tcx>(
             let lhs_ty = deduce_expr_ty(lhs, arena, &locals)?;
             let rhs_ty = deduce_expr_ty(rhs, arena, &locals)?;
             log::debug!("{:?} {:?}", lhs_ty, rhs_ty);
-            if !are_types_compatible(lhs_ty, rhs_ty) {
+            if !is_compatible_to(lhs_ty, rhs_ty) {
                 return Err(format!("mismatched types {:?} and {:?}", lhs_ty, rhs_ty));
             }
 
@@ -95,7 +96,7 @@ fn deduce_expr_ty<'tcx>(
             let first = deduce_expr_ty(&items[0], arena, locals)?;
             for next in items.iter().skip(1) {
                 let ty = deduce_expr_ty(next, arena, locals)?;
-                if !are_types_compatible(ty, first) {
+                if !is_compatible_to(ty, first) {
                     return Err("incompatible".into());
                 }
             }
@@ -116,7 +117,7 @@ fn deduce_expr_ty<'tcx>(
                     for (arg, expected_ty) in args.iter().zip(args_ty) {
                         let arg_ty = deduce_expr_ty(arg, arena, locals)?;
 
-                        if !are_types_compatible(arg_ty, expected_ty) {
+                        if !is_compatible_to(arg_ty, expected_ty) {
                             return Err(format!("incompatible types {:?} and {:?}", arg_ty, expected_ty));
                         }
                     }
@@ -129,7 +130,7 @@ fn deduce_expr_ty<'tcx>(
         Expression::Range(from, Some(to)) => {
             let from_ty = deduce_expr_ty(from, arena, locals)?;
             let to_ty = deduce_expr_ty(to, arena, locals)?;
-            if !are_types_compatible(from_ty, to_ty) {
+            if !is_compatible_to(from_ty, to_ty) {
                 return Err("incompatible range bounds".into());
             }
             arena.alloc(TyS::Range)
@@ -165,7 +166,7 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
                 log::debug!("deduced type {:?} for binding {}", expr_ty, name);
                 let ty = match ty {
                     Some(ty) => {
-                        if !are_types_compatible(ty, expr_ty) {
+                        if !is_compatible_to(ty, expr_ty) {
                             return Err(format!("mismatched types. expected {:?}, got {:?}", ty, expr_ty));
                         }
                         ty
@@ -181,7 +182,7 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
                 let lhs_ty = deduce_expr_ty(lhs, arena, &locals)?;
                 let rhs_ty = deduce_expr_ty(expr, arena, &locals)?;
 
-                if !are_types_compatible(lhs_ty, rhs_ty) {
+                if !is_compatible_to(lhs_ty, rhs_ty) {
                     return Err(format!("incompatible types in assignment, got {:?} and {:?}", lhs_ty, rhs_ty));
                 }
             }
@@ -210,7 +211,7 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
             }
             Item::If { condition, arm_true, arm_false } => {
                 let cond_ty = deduce_expr_ty(condition, arena, &locals)?;
-                if !are_types_compatible(cond_ty, arena.alloc(TyS::Bool)) {
+                if !is_compatible_to(cond_ty, arena.alloc(TyS::Bool)) {
                     return Err(format!("only boolean expressions are allowed in if conditions"));
                 }
                 infer_types(arm_true, arena, locals, expected_ret_ty)?;
@@ -239,7 +240,7 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
                     panic!("return outside of a function");
                 }
                 let ty = deduce_expr_ty(expr, arena, locals)?;
-                if !are_types_compatible(ty, expected_ret_ty.unwrap()) {
+                if !is_compatible_to(ty, expected_ret_ty.unwrap()) {
                     return Err(format!("function marked as returning {:?} but returned {:?}", expected_ret_ty.unwrap(), ty));
                 }
             }
