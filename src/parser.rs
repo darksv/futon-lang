@@ -100,7 +100,7 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
         let item = if self.match_many(&['+', '=']) {
             Item::Assignment {
                 lhs,
-                operator: Some('+'),
+                operator: Some(Operator::Add),
                 expr: self.parse_expr(0)?,
             }
         } else if self.match_one('=') {

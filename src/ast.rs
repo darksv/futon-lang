@@ -53,7 +53,7 @@ pub(crate) enum Item<'tcx> {
     },
     Assignment {
         lhs: Expression,
-        operator: Option<char>,
+        operator: Option<Operator>,
         expr: Expression,
     },
     Expr {

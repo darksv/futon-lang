@@ -116,7 +116,7 @@ fn genc_item<'a, 'tcx: 'a>(
         } => {
             match operator {
                 Some(op) => {
-                    fmt.writeln(&format!("{} {}= {};", format_expr(lhs), op, format_expr(expr)));
+                    fmt.writeln(&format!("{} {}= {};", format_expr(lhs), format_operator(op), format_expr(expr)));
                 }
                 None => {
                     fmt.writeln(&format!("{} = {};", format_expr(lhs), format_expr(expr)));
