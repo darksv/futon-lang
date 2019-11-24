@@ -1,4 +1,4 @@
-fn foo() {
+fn foo() -> i32 {
     fn bar() {
         fn baz() -> u32 {
             return 32;
