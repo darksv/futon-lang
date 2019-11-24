@@ -105,9 +105,6 @@ fn deduce_expr_ty<'tcx>(
         }
         Expression::Call(callee, args) => {
             match callee.as_ref() {
-                Expression::Identifier(ident) if ident == "range" => {
-                    arena.alloc(TyS::Range)
-                }
                 Expression::Identifier(ident) => {
                     let callee = locals.get(ident.as_str()).expect(&format!("a type for {}", ident.as_str()));
                     let (args_ty, ret_ty) = match callee {
