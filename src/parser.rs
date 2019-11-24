@@ -242,6 +242,7 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
                         (TokenType::Punct('>'), _, _) => Operator::Greater,
                         (TokenType::Punct('='), TokenType::Punct('='), true) => Operator::Equal,
                         (TokenType::Punct('!'), TokenType::Punct('='), true) => Operator::NotEqual,
+                        (TokenType::Punct('='), _, _) => return Ok(Some(expr)),
                         _ => return Err(ParseError::UnexpectedToken(
                             second.get_type(),
                             second.line(),
