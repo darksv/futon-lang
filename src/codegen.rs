@@ -1,5 +1,4 @@
-use crate::ast::{Expression, Item};
-use crate::lexer::TokenType;
+use crate::ast::{Expression, Item, Operator};
 use std::borrow::{Borrow, Cow};
 use std::collections::{HashMap, HashSet};
 use crate::ty::{Ty, TyS};
@@ -316,10 +315,18 @@ fn format_ty(ty: Ty) -> Cow<str> {
     }
 }
 
-fn format_operator(op: &TokenType) -> Cow<'static, str> {
+fn format_operator(op: &Operator) -> Cow<'static, str> {
     match op {
-        TokenType::Punct(c) => Cow::Owned(c.to_string()),
-        _ => Cow::Borrowed(""),
+        Operator::Add => Cow::Borrowed("+"),
+        Operator::Sub => Cow::Borrowed("-"),
+        Operator::Mul => Cow::Borrowed("*"),
+        Operator::Div => Cow::Borrowed("/"),
+        Operator::Less => Cow::Borrowed("<"),
+        Operator::Greater => Cow::Borrowed(">"),
+        Operator::LessEqual => Cow::Borrowed("<="),
+        Operator::GreaterEqual => Cow::Borrowed(">="),
+        Operator::Negate => Cow::Borrowed("-"),
+        Operator::Deref => Cow::Borrowed("*"),
     }
 }
 

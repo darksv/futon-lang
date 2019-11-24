@@ -1,4 +1,3 @@
-use crate::lexer::TokenType;
 use crate::ty::Ty;
 
 
@@ -14,14 +13,28 @@ pub(crate) struct Field<'tcx> {
     pub ty: Ty<'tcx>,
 }
 
+#[derive(Debug, Copy, Clone)]
+pub(crate) enum Operator {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
+    Negate,
+    Deref,
+}
+
 #[derive(Debug, Clone)]
-pub enum Expression {
+pub(crate) enum Expression {
     Identifier(String),
     Integer(i64),
     Float(f64),
     Bool(bool),
-    Prefix(TokenType, Box<Expression>),
-    Infix(TokenType, Box<Expression>, Box<Expression>),
+    Prefix(Operator, Box<Expression>),
+    Infix(Operator, Box<Expression>, Box<Expression>),
     Place(Box<Expression>, Box<Expression>),
     Array(Vec<Expression>),
     Tuple(Vec<Expression>),

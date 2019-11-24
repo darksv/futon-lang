@@ -1,8 +1,7 @@
 use std::collections::HashMap;
-use crate::ast::{Item, Expression};
+use crate::ast::{Item, Expression, Operator};
 use crate::arena::Arena;
 use crate::ty::{TyS, Ty};
-use crate::lexer::TokenType;
 
 fn are_types_compatible(a: Ty<'_>, b: Ty<'_>) -> bool {
     match (a, b) {
@@ -60,14 +59,15 @@ fn deduce_expr_ty<'tcx>(
             }
 
             match op {
-                TokenType::Punct(ch) => {
-                    match ch {
-                        '<' | '>' => return Ok(arena.alloc(TyS::Bool)),
-                        '+' | '-' | '*' | '/' => return Ok(lhs_ty),
-                        _ => unreachable!(),
-                    }
-                }
-                _ => unreachable!(),
+                | Operator::Less
+                | Operator::LessEqual
+                | Operator::Greater
+                | Operator::GreaterEqual => return Ok(arena.alloc(TyS::Bool)),
+                | Operator::Add
+                | Operator::Sub
+                | Operator::Mul
+                | Operator::Div => return Ok(lhs_ty),
+                _ => unreachable!()
             }
         }
         Expression::Prefix(_op, expr) => {
