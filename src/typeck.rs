@@ -68,10 +68,18 @@ fn deduce_expr_ty<'tcx>(
                 | Operator::NotEqual => return Ok(arena.alloc(TyS::Bool)),
                 Operator::Add | Operator::Sub | Operator::Mul | Operator::Div => return Ok(lhs_ty),
                 Operator::Negate => unimplemented!(),
+                Operator::Ref => unimplemented!(),
                 Operator::Deref => unimplemented!(),
             }
         }
-        Expression::Prefix(_op, expr) => deduce_expr_ty(expr, arena, &locals)?,
+        Expression::Prefix(op, expr) => {
+            let inner = deduce_expr_ty(expr, arena, &locals)?;
+            match op {
+                Operator::Ref => arena.alloc(TyS::Pointer(inner)),
+                Operator::Deref => unimplemented!(),
+                _ => inner,
+            }
+        }
         Expression::Identifier(ident) => {
             if let Some(ty) = locals.get(ident.as_str()) {
                 ty

@@ -345,6 +345,7 @@ fn format_operator(op: &Operator) -> Cow<'static, str> {
         Operator::LessEqual => Cow::Borrowed("<="),
         Operator::GreaterEqual => Cow::Borrowed(">="),
         Operator::Negate => Cow::Borrowed("-"),
+        Operator::Ref => Cow::Borrowed("&"),
         Operator::Deref => Cow::Borrowed("*"),
     }
 }

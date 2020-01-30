@@ -124,10 +124,11 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
     fn parse_expr_opt(&mut self, precedence: isize) -> ParseResult<Option<Expression>> {
         let token = self.peek(0);
         let lhs = match token.get_type() {
-            TokenType::Punct('-') | TokenType::Punct('*') => {
+            TokenType::Punct('-') | TokenType::Punct('&') | TokenType::Punct('*') => {
                 self.advance();
                 let op = match token.get_type() {
                     TokenType::Punct('-') => Operator::Negate,
+                    TokenType::Punct('&') => Operator::Ref,
                     TokenType::Punct('*') => Operator::Deref,
                     _ => unreachable!(),
                 };
