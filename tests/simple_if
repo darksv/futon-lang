@@ -1,4 +1,4 @@
-fn abc(x: u32) -> bool {
+fn abc(x: i32) -> bool {
     if x < 10 {
         return true;
     } else {

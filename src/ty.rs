@@ -12,6 +12,7 @@ pub(crate) enum TyS<'t> {
     Pointer(Ty<'t>),
     Range,
     Other(String),
+    Unknown,
 }
 
 pub(crate) type Ty<'tcx> = &'tcx TyS<'tcx>;

@@ -350,9 +350,9 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
         self.expect_one(')')?;
 
         let ty = if self.match_many(&['-', '>']) {
-            Some(self.parse_ty()?)
+            self.parse_ty()?
         } else {
-            None
+            self.make_ty(TyS::Unit)
         };
 
         let body = if is_extern {

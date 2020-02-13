@@ -1,18 +1,35 @@
-extern fn print(a: i32);
-
 fn add(a: u32, b: u32) -> u32 {
     let c: u32 = a * b;
     let c2: u32 = a + b * c;
     let d: u32 = -a - b;
-    let e = -a - b - c;
+    let e = -a - b - c2;
 
-    let xd: [5]i32 = [1,2,3,4,5];
-    for item in xd {
-        print(item);
-    }
-
-    return c - a - b;
+    return c - a / d - b * e;
 }
 
+fn min(a: u32, b: u32, c: u32) -> u32 {
+    if a < b {
+        if a < c {
+            return a;
+        } else {
+            return c;
+        }
+    } else {
+        if b < c {
+            return b;
+        } else {
+            return b;
+        }
+    }
+}
 
-
+fn triangleExists(a: u32, b: u32, c: u32) -> bool {
+    if a + b > c {
+        if a + c > b {
+            if b + c > a {
+                return true;
+            }
+        }
+    }
+    return false;
+}

@@ -2,6 +2,7 @@ mod arena;
 mod ast;
 mod codegen;
 mod lexer;
+mod mir;
 mod multi_peek;
 mod parser;
 mod ty;
@@ -15,6 +16,7 @@ use parser::Parser;
 use std::collections::HashMap;
 use std::env;
 use std::path::Path;
+use crate::mir::{build_mir, dump_mir, execute_mir, Const};
 
 fn main() {
     env_logger::init();
@@ -48,9 +50,15 @@ fn compile_file(path: impl AsRef<Path>) {
             let mut locals = HashMap::new();
             match infer_types(k, &arena, &mut locals, None) {
                 Ok(_) => {
-                    codegen::genc(&mut s, k);
-                    println!("// {}", path.as_ref().to_str().unwrap());
-                    println!("{}", s.build());
+                    for item in k {
+                        let mir = build_mir(item).unwrap();
+                        dump_mir(&mir, &mut std::io::stdout()).unwrap();
+                        println!("evaluated: {:?}", execute_mir(&mir, &[Const::U32(300), Const::U32(1000), Const::U32(2100),]));
+                    }
+
+//                    codegen::genc(&mut s, k);
+//                    println!("// {}", path.as_ref().to_str().unwrap());
+//                    println!("{}", s.build());
                 }
                 Err(e) => {
                     println!("typeck error: {}", e);

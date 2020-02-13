@@ -18,9 +18,9 @@ fn is_compatible_to(ty: Ty<'_>, subty: Ty<'_>) -> bool {
         (TyS::Tuple(ty1), TyS::Tuple(ty2)) => {
             ty1.len() == ty2.len()
                 && ty1
-                    .iter()
-                    .zip(ty2.iter())
-                    .all(|(ty1, ty2)| is_compatible_to(ty1, ty2))
+                .iter()
+                .zip(ty2.iter())
+                .all(|(ty1, ty2)| is_compatible_to(ty1, ty2))
         }
         (TyS::Function(args1, ret1), TyS::Function(args2, ret2)) => {
             if args1.len() != args2.len() {
@@ -211,10 +211,7 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
                 body,
                 ..
             } => {
-                if ty.is_none() {
-                    *ty = Some(arena.alloc(TyS::Unit));
-                }
-                let func_ty = TyS::Function(args.iter().map(|it| it.ty).collect(), ty.unwrap());
+                let func_ty = TyS::Function(args.iter().map(|it| it.ty).collect(), ty);
                 let func_ty = arena.alloc(func_ty);
                 locals.insert(name.as_str(), func_ty);
                 for arg in args {
@@ -222,7 +219,7 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
                     locals.insert(arg.name.as_str(), arg.ty);
                 }
 
-                infer_types(body, arena, locals, *ty)?;
+                infer_types(body, arena, locals, Some(*ty))?;
             }
             Item::Struct { .. } => {
                 log::debug!("ifnore struct");

@@ -149,8 +149,8 @@ fn genc_item<'a, 'tcx: 'a>(
             body,
             ..
         } => {
-            ensure_ty_emitted(fmt, emitted_tys, ty.unwrap());
-            fmt.write(&format!("{} {}(", format_ty(ty.unwrap()), name));
+            ensure_ty_emitted(fmt, emitted_tys, ty);
+            fmt.write(&format!("{} {}(", format_ty(ty), name));
             if args.is_empty() {
                 fmt.write("void");
             } else {
@@ -311,6 +311,7 @@ fn ensure_ty_emitted<'tcx>(fmt: &mut SourceBuilder, emitted: &mut HashSet<Ty<'tc
         TyS::Pointer(_) => {}
         TyS::Range => {}
         TyS::Other(_) => {}
+        TyS::Unknown => {}
     }
     emitted.insert(ty);
 }
@@ -329,6 +330,7 @@ fn format_ty(ty: Ty) -> Cow<str> {
         TyS::Pointer(inner) => Cow::Owned(format!("{}*", format_ty(inner))),
         TyS::Bool => Cow::Borrowed("bool"),
         TyS::Range => Cow::Borrowed("/* generated */"),
+        TyS::Unknown => Cow::Borrowed("/* unknown */"),
     }
 }
 
