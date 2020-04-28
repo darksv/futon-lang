@@ -1,0 +1,20 @@
+fn foo(n: i32) -> i32 {
+    let i = 0;
+    let j = 0;
+    let k = 0;
+    loop {
+        if i == n {
+            break;
+        }
+
+        loop {
+            if j == n {
+                break;
+            }
+            j += 1;
+        }
+        i += 1;
+    }
+
+    return i * j;
+}
