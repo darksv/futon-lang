@@ -1,0 +1,11 @@
+fn sum(a: i32) -> i32 {
+    let sum = 0;
+    let i = 0;
+    loop {
+        if i == a {
+            return sum;
+        }
+        i += 1;
+        sum += i;
+    }
+}

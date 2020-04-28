@@ -164,12 +164,16 @@ impl<'tcx> MirBuilder<'tcx> {
         block
     }
 
-    fn end_block(&mut self) {
-        self.blocks_stack.pop();
+    fn end_block(&mut self) -> Block {
+        self.blocks_stack.pop().unwrap()
     }
 
     fn set_terminator(&mut self, term: Terminator) {
         self.blocks[self.blocks_stack.last().unwrap().0].terminator = term;
+    }
+
+    fn set_terminator_of(&mut self, block: Block, term: Terminator) {
+        self.blocks[block.0].terminator = term;
     }
 
     fn push(&mut self, inst: Instr) {
@@ -222,47 +226,85 @@ fn visit_expr(expr: &Expression, builder: &mut MirBuilder, stack: &mut Vec<Var>,
 fn visit_item<'tcx>(
     item: &Item<'tcx>,
     builder: &mut MirBuilder<'tcx>,
-    stack: &mut Vec<Var>,
-    names: &mut HashMap<String, Var>,
+    temporaries: &mut Vec<Var>,
+    local_names: &mut HashMap<String, Var>,
     ret: Option<Var>,
+    loop_begin: Option<Block>,
 ) {
     match item {
         Item::Let { name, ty, expr } => {
             let var = builder.make_var(ty.unwrap(), Some(name.as_str()));
-            names.insert(name.clone(), var);
+            local_names.insert(name.clone(), var);
 
             if let Some(expr) = expr {
-                visit_expr(expr, builder, stack, &names);
+                visit_expr(expr, builder, temporaries, &local_names);
             }
-            builder.push(Instr::Copy(var, stack.last().copied().unwrap()));
+            builder.push(Instr::Copy(var, temporaries.last().copied().unwrap()));
         }
         Item::Assignment { lhs, operator, expr } => {
-            visit_expr(lhs, builder, stack, &names);
-            visit_expr(expr, builder, stack, &names);
+            visit_expr(expr, builder, temporaries, &local_names);
+            let lhs = match lhs {
+                Expression::Identifier(ident) => local_names[ident],
+                _ => unimplemented!(),
+            };
+
+            let rhs = temporaries.pop().unwrap();
+            if let Some(op) = operator {
+                builder.push(Instr::BinaryOperation(lhs, *op, lhs, rhs));
+            } else {
+                builder.push(Instr::Copy(lhs, rhs));
+            }
         }
         Item::Expr { expr } => {
-            visit_expr(expr, builder, stack, &names);
+            visit_expr(expr, builder, temporaries, &local_names);
         }
         Item::If { condition, arm_true, arm_false } => {
-            visit_expr(condition, builder, stack, &names);
-            let var = *stack.last().unwrap();
+            visit_expr(condition, builder, temporaries, &local_names);
+            let var = *temporaries.last().unwrap();
             let block_true = builder.begin_block();
             for item in arm_true {
-                visit_item(item, builder, stack, names, ret);
+                visit_item(item, builder, temporaries, local_names, ret, loop_begin);
             }
             builder.end_block();
-            let block_false = builder.begin_block();
-            if let Some(arm_false) = arm_false {
+
+            let block_false = if let Some(arm_false) = arm_false {
+                let block_false = builder.begin_block();
                 for item in arm_false {
-                    visit_item(item, builder, stack, names, ret);
+                    visit_item(item, builder, temporaries, local_names, ret, loop_begin);
+                }
+                builder.end_block();
+                Some(block_false)
+            } else {
+                None
+            };
+            let if_block = builder.end_block();
+            let next_block = builder.begin_block();
+
+            let block_false = if let Some(b) = block_false { b } else { next_block };
+            builder.set_terminator_of(if_block, Terminator::JumpIf(var, block_true, block_false));
+            if let Some(bl) = loop_begin {
+                builder.set_terminator(Terminator::Jump(bl));
+            }
+        }
+        Item::Return(expr) => {
+            visit_expr(expr, builder, temporaries, &local_names);
+            builder.push(Instr::Copy(ret.unwrap(), temporaries.pop().unwrap()));
+        }
+        Item::Break => {},
+        Item::Loop { body } => {
+            let prev = builder.end_block();
+            let next = builder.begin_block();
+            builder.set_terminator_of(prev, Terminator::Jump(next));
+            for item in body {
+                match item {
+                    Item::Break => {}
+                    Item::Yield(_) => {}
+                    Item::Return(_) => {}
+                    other => visit_item(other, builder, temporaries, local_names, ret, Some(next)),
                 }
             }
             builder.end_block();
-            builder.set_terminator(Terminator::JumpIf(var, block_true, block_false));
-        }
-        Item::Return(expr) => {
-            visit_expr(expr, builder, stack, &names);
-            builder.push(Instr::Copy(ret.unwrap(), stack.pop().unwrap()));
+            builder.begin_block();
         }
         other => unimplemented!("{:?}", other),
     }
@@ -277,14 +319,13 @@ pub(crate) fn build_mir<'tcx>(item: &Item<'tcx>) -> Result<Mir<'tcx>, ()> {
                 let var = builder.make_arg(arg.ty, Some(name.as_str()));
                 names.insert(arg.name.clone(), var);
             }
-            let r = builder.make_ret(ty);
+            let ret = builder.make_ret(ty);
 
             let mut stack = vec![];
             builder.begin_block();
             for item in body {
-                visit_item(item, &mut builder, &mut stack, &mut names, Some(r));
+                visit_item(item, &mut builder, &mut stack, &mut names, Some(ret), None);
             }
-            builder.end_block();
 
             return Ok(builder.build(name.to_owned()));
         }
@@ -318,8 +359,6 @@ pub(crate) fn execute_mir(mir: &Mir<'_>, args: &[Const]) -> Const {
                             (Operator::Negate, Const::U32(v)) => Const::U32(v),
                             _ => unimplemented!(),
                         };
-
-                        dbg!(dst, op, a, val);
                         vars.insert(*dst, val);
                     }
                     Instr::BinaryOperation(dst, op, a, b) => {
@@ -330,12 +369,9 @@ pub(crate) fn execute_mir(mir: &Mir<'_>, args: &[Const]) -> Const {
                             (Operator::Div, Const::U32(a), Const::U32(b)) => Const::U32(a / b),
                             (Operator::Less, Const::U32(a), Const::U32(b)) => Const::Bool(a < b),
                             (Operator::Greater, Const::U32(a), Const::U32(b)) => Const::Bool(a > b),
+                            (Operator::Equal, Const::U32(a), Const::U32(b)) => Const::Bool(a == b),
                             _ => unimplemented!(),
                         };
-
-                        dbg!(dst, op, a, b, val);
-
-
                         vars.insert(*dst, val);
                     }
                 }
@@ -344,6 +380,7 @@ pub(crate) fn execute_mir(mir: &Mir<'_>, args: &[Const]) -> Const {
             None => match mir.blocks[curr_block].terminator {
                 Terminator::Jump(block) => {
                     curr_block = block.0;
+                    curr_inst = 0;
                 }
                 Terminator::JumpIf(var, if_true, if_else) => {
                     match vars[&var] {
@@ -351,7 +388,7 @@ pub(crate) fn execute_mir(mir: &Mir<'_>, args: &[Const]) -> Const {
                             curr_block = if v { if_true.0 } else { if_else.0 };
                             curr_inst = 0;
                         }
-                        _ => unimplemented!(),
+                        other => unimplemented!("{:?}", other),
                     }
                 }
                 Terminator::Return => {
