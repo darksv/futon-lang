@@ -1,5 +1,5 @@
 use crate::arena::Arena;
-use crate::ast::{Expression, Item, Operator};
+use crate::ast::{Expr, Item, Operator, TyExpr};
 use crate::ty::{Ty, TyS};
 use std::collections::HashMap;
 
@@ -43,15 +43,15 @@ fn is_compatible_to(ty: Ty<'_>, subty: Ty<'_>) -> bool {
 }
 
 fn deduce_expr_ty<'tcx>(
-    e: &Expression,
+    expr: &mut TyExpr<'tcx>,
     arena: &'tcx Arena<TyS<'tcx>>,
     locals: &HashMap<&str, Ty<'tcx>>,
 ) -> Result<Ty<'tcx>, String> {
-    Ok(match e {
-        Expression::Integer(_) => arena.alloc(TyS::I32),
-        Expression::Float(_) => arena.alloc(TyS::F32),
-        Expression::Bool(_) => arena.alloc(TyS::Bool),
-        Expression::Infix(op, lhs, rhs) => {
+    let ty = match &mut expr.expr {
+        Expr::Integer(_) => arena.alloc(TyS::I32),
+        Expr::Float(_) => arena.alloc(TyS::F32),
+        Expr::Bool(_) => arena.alloc(TyS::Bool),
+        Expr::Infix(op, lhs, rhs) => {
             let lhs_ty = deduce_expr_ty(lhs, arena, &locals)?;
             let rhs_ty = deduce_expr_ty(rhs, arena, &locals)?;
             log::debug!("{:?} {:?}", lhs_ty, rhs_ty);
@@ -65,14 +65,14 @@ fn deduce_expr_ty<'tcx>(
                 | Operator::Greater
                 | Operator::GreaterEqual
                 | Operator::Equal
-                | Operator::NotEqual => return Ok(arena.alloc(TyS::Bool)),
-                Operator::Add | Operator::Sub | Operator::Mul | Operator::Div => return Ok(lhs_ty),
+                | Operator::NotEqual => arena.alloc(TyS::Bool),
+                Operator::Add | Operator::Sub | Operator::Mul | Operator::Div => lhs_ty,
                 Operator::Negate => unimplemented!(),
                 Operator::Ref => unimplemented!(),
                 Operator::Deref => unimplemented!(),
             }
         }
-        Expression::Prefix(op, expr) => {
+        Expr::Prefix(op, expr) => {
             let inner = deduce_expr_ty(expr, arena, &locals)?;
             match op {
                 Operator::Ref => arena.alloc(TyS::Pointer(inner)),
@@ -80,24 +80,24 @@ fn deduce_expr_ty<'tcx>(
                 _ => inner,
             }
         }
-        Expression::Identifier(ident) => {
+        Expr::Identifier(ident) => {
             if let Some(ty) = locals.get(ident.as_str()) {
                 ty
             } else {
                 return Err(format!("no local {:?}", ident));
             }
         }
-        Expression::Place(expr, ty) => {
+        Expr::Place(expr, ty) => {
             log::debug!("{:?} {:?}", expr, ty);
             return Err("unsupported".into());
         }
-        Expression::Array(items) => {
+        Expr::Array(items) => {
             if items.is_empty() {
                 panic!("cant deduce type of array items");
             }
 
-            let first = deduce_expr_ty(&items[0], arena, locals)?;
-            for next in items.iter().skip(1) {
+            let first = deduce_expr_ty(&mut items[0], arena, locals)?;
+            for next in items.iter_mut().skip(1) {
                 let ty = deduce_expr_ty(next, arena, locals)?;
                 if !is_compatible_to(ty, first) {
                     return Err("incompatible".into());
@@ -106,8 +106,8 @@ fn deduce_expr_ty<'tcx>(
 
             arena.alloc(TyS::Array(items.len(), first))
         }
-        Expression::Call(callee, args) => match callee.as_ref() {
-            Expression::Identifier(ident) => {
+        Expr::Call(callee, args) => match &mut callee.as_mut().expr {
+            Expr::Identifier(ident) => {
                 let callee = locals
                     .get(ident.as_str())
                     .expect(&format!("a type for {}", ident.as_str()));
@@ -115,7 +115,7 @@ fn deduce_expr_ty<'tcx>(
                     TyS::Function(args_ty, ret_ty) => (args_ty, ret_ty),
                     _ => return Err(format!("{} is not callable", ident.as_str())),
                 };
-                for (arg, expected_ty) in args.iter().zip(args_ty) {
+                for (arg, expected_ty) in args.iter_mut().zip(args_ty) {
                     let arg_ty = deduce_expr_ty(arg, arena, locals)?;
 
                     if !is_compatible_to(arg_ty, expected_ty) {
@@ -130,7 +130,7 @@ fn deduce_expr_ty<'tcx>(
             }
             expr => unimplemented!("{:?}", expr),
         },
-        Expression::Range(from, Some(to)) => {
+        Expr::Range(from, Some(to)) => {
             let from_ty = deduce_expr_ty(from, arena, locals)?;
             let to_ty = deduce_expr_ty(to, arena, locals)?;
             if !is_compatible_to(from_ty, to_ty) {
@@ -138,18 +138,20 @@ fn deduce_expr_ty<'tcx>(
             }
             arena.alloc(TyS::Range)
         }
-        Expression::Range(to, None) => {
+        Expr::Range(to, None) => {
             let _to_ty = deduce_expr_ty(to, arena, locals)?;
             arena.alloc(TyS::Range)
         }
-        Expression::Tuple(values) => {
+        Expr::Tuple(values) => {
             let types: Result<Vec<_>, _> = values
-                .iter()
+                .iter_mut()
                 .map(|v| deduce_expr_ty(v, arena, locals))
                 .collect();
             arena.alloc(TyS::Tuple(types?))
         }
-    })
+    };
+    expr.ty = ty;
+    Ok(ty)
 }
 
 pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
@@ -166,7 +168,7 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
                         "no expression on the right hand side of the let binding"
                     ));
                 }
-                let expr = expr.as_ref().unwrap();
+                let expr = expr.as_mut().unwrap();
                 let expr_ty = deduce_expr_ty(expr, arena, &locals)?;
                 log::debug!("deduced type {:?} for binding {}", expr_ty, name);
                 let ty = match ty {

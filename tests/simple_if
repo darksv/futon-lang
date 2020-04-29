@@ -1,7 +1,14 @@
 fn abc(x: i32) -> bool {
-    if x < 10 {
-        return true;
-    } else {
-        return false;
+    let a = 3;
+    loop {
+        let a = 5;
+        if x < 10 {
+            return true;
+        } else {
+            return false;
+        }
+        let b = 1;
+        break;
     }
+    let x = 1000;
 }

@@ -30,18 +30,24 @@ pub(crate) enum Operator {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum Expression {
+pub(crate) enum Expr<'tcx> {
     Identifier(String),
     Integer(i64),
     Float(f64),
     Bool(bool),
-    Prefix(Operator, Box<Expression>),
-    Infix(Operator, Box<Expression>, Box<Expression>),
-    Place(Box<Expression>, Box<Expression>),
-    Array(Vec<Expression>),
-    Tuple(Vec<Expression>),
-    Call(Box<Expression>, Vec<Expression>),
-    Range(Box<Expression>, Option<Box<Expression>>),
+    Prefix(Operator, Box<TyExpr<'tcx>>),
+    Infix(Operator, Box<TyExpr<'tcx>>, Box<TyExpr<'tcx>>),
+    Place(Box<TyExpr<'tcx>>, Box<TyExpr<'tcx>>),
+    Array(Vec<TyExpr<'tcx>>),
+    Tuple(Vec<TyExpr<'tcx>>),
+    Call(Box<TyExpr<'tcx>>, Vec<TyExpr<'tcx>>),
+    Range(Box<TyExpr<'tcx>>, Option<Box<TyExpr<'tcx>>>),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct TyExpr<'tcx> {
+    pub(crate) ty: Ty<'tcx>,
+    pub(crate) expr: Expr<'tcx>,
 }
 
 #[derive(Debug)]
@@ -49,15 +55,15 @@ pub(crate) enum Item<'tcx> {
     Let {
         name: String,
         ty: Option<Ty<'tcx>>,
-        expr: Option<Expression>,
+        expr: Option<TyExpr<'tcx>>,
     },
     Assignment {
-        lhs: Expression,
+        lhs: TyExpr<'tcx>,
         operator: Option<Operator>,
-        expr: Expression,
+        expr: TyExpr<'tcx>,
     },
     Expr {
-        expr: Expression,
+        expr: TyExpr<'tcx>,
     },
     Function {
         name: String,
@@ -71,19 +77,19 @@ pub(crate) enum Item<'tcx> {
         fields: Vec<Field<'tcx>>,
     },
     If {
-        condition: Expression,
+        condition: TyExpr<'tcx>,
         arm_true: Vec<Item<'tcx>>,
         arm_false: Option<Vec<Item<'tcx>>>,
     },
     ForIn {
         name: String,
-        expr: Expression,
+        expr: TyExpr<'tcx>,
         body: Vec<Item<'tcx>>,
     },
     Loop {
         body: Vec<Item<'tcx>>,
     },
     Break,
-    Yield(Box<Expression>),
-    Return(Box<Expression>),
+    Yield(Box<TyExpr<'tcx>>),
+    Return(Box<TyExpr<'tcx>>),
 }

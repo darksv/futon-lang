@@ -1,5 +1,5 @@
-use crate::ty::{Ty, TyS};
-use crate::ast::{Operator, Item, Expression};
+use crate::ty::Ty;
+use crate::ast::{Operator, Item, Expr, TyExpr};
 use std::{fmt, io};
 use std::io::Write;
 use std::collections::HashMap;
@@ -173,33 +173,40 @@ impl<'tcx> MirBuilder<'tcx> {
     }
 }
 
-fn visit_expr(expr: &Expression, builder: &mut MirBuilder, stack: &mut Vec<Var>, names: &HashMap<String, Var>, block: Block) {
-    match expr {
-        Expression::Identifier(id) => {
+fn visit_expr<'tcx>(
+    expr: &TyExpr<'tcx>,
+    builder: &mut MirBuilder<'tcx>,
+    stack: &mut Vec<Var>,
+    names: &HashMap<String, Var>,
+    block: Block,
+) {
+    match &expr.expr {
+        Expr::Identifier(id) => {
             stack.push(names[id]);
         }
-        Expression::Integer(val) => {
-            let var = builder.make_var(&TyS::U32, None);
+        Expr::Integer(val) => {
+            let var = builder.make_var(expr.ty, None);
             stack.push(var);
             builder.push(block, Instr::Const(var, Const::U32(*val as u32)));
         }
-        Expression::Float(val) => {
-            let var = builder.make_var(&TyS::F32, None);
+        Expr::Float(val) => {
+            let var = builder.make_var(expr.ty, None);
             stack.push(var);
             builder.push(block, Instr::Const(var, Const::F32(*val as f32)));
         }
-        Expression::Bool(val) => {
-            let var = builder.make_var(&TyS::Bool, None);
+        Expr::Bool(val) => {
+            let var = builder.make_var(expr.ty, None);
             stack.push(var);
             builder.push(block, Instr::Const(var, Const::Bool(*val)));
         }
-        Expression::Prefix(op, expr) => {
-            let var = builder.make_var(&TyS::Unknown, None);
+        Expr::Prefix(op, rhs) => {
+            let var = builder.make_var(expr.ty, None);
+            visit_expr(rhs, builder, stack, &names, block);
             builder.push(block, Instr::UnaryOperation(var, *op, stack.pop().unwrap()));
             stack.push(var);
         }
-        Expression::Infix(op, lhs, rhs) => {
-            let var = builder.make_var(&TyS::Unknown, None);
+        Expr::Infix(op, lhs, rhs) => {
+            let var = builder.make_var(expr.ty, None);
             visit_expr(lhs, builder, stack, &names, block);
             visit_expr(rhs, builder, stack, &names, block);
 
@@ -235,8 +242,8 @@ fn visit_item<'tcx>(
         }
         Item::Assignment { lhs, operator, expr } => {
             visit_expr(expr, builder, temporaries, &local_names, *block);
-            let lhs = match lhs {
-                Expression::Identifier(ident) => local_names[ident],
+            let lhs = match &lhs.expr {
+                Expr::Identifier(ident) => local_names[ident],
                 _ => unimplemented!(),
             };
 
@@ -279,7 +286,7 @@ fn visit_item<'tcx>(
             builder.set_terminator_of(*block, Terminator::Return);
         }
         Item::Break => {
-            builder.set_terminator_of(*block,Terminator::Jump(after_loop.unwrap()));
+            builder.set_terminator_of(*block, Terminator::Jump(after_loop.unwrap()));
         }
         Item::Loop { body } => {
             let entry = builder.block();

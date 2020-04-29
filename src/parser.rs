@@ -1,6 +1,6 @@
 use super::{Keyword, Lexer, PunctKind, Token, TokenType};
 use crate::arena::Arena;
-use crate::ast::{Argument, Expression, Field, Item, Operator};
+use crate::ast::{Argument, Expr, Field, Item, Operator, TyExpr};
 use crate::multi_peek::MultiPeek;
 use crate::ty::{Ty, TyS};
 use std::fmt;
@@ -85,7 +85,7 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
                 TokenType::Identifier => {
                     let lhs = self
                         .parse_expr_opt(0)?
-                        .unwrap_or_else(|| Expression::Identifier(token.as_string()));
+                        .unwrap_or_else(|| self.make_tyexpr(Expr::Identifier(token.as_string())));
                     self.parse_assign_or_expr(lhs)
                 }
                 _ => break,
@@ -95,7 +95,7 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
         Ok(items)
     }
 
-    fn parse_assign_or_expr(&mut self, lhs: Expression) -> ParseResult<Item<'tcx>> {
+    fn parse_assign_or_expr(&mut self, lhs: TyExpr<'tcx>) -> ParseResult<Item<'tcx>> {
         let item = if self.match_many(&['+', '=']) {
             Item::Assignment {
                 lhs,
@@ -115,13 +115,13 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
         Ok(item)
     }
 
-    fn parse_expr(&mut self, precedence: isize) -> ParseResult<Expression> {
+    fn parse_expr(&mut self, precedence: isize) -> ParseResult<TyExpr<'tcx>> {
         Ok(self
             .parse_expr_opt(precedence)?
             .ok_or(ParseError::Custom("missing expression"))?)
     }
 
-    fn parse_expr_opt(&mut self, precedence: isize) -> ParseResult<Option<Expression>> {
+    fn parse_expr_opt(&mut self, precedence: isize) -> ParseResult<Option<TyExpr<'tcx>>> {
         let token = self.peek(0);
         let lhs = match token.get_type() {
             TokenType::Punct('-') | TokenType::Punct('&') | TokenType::Punct('*') => {
@@ -133,40 +133,40 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
                     _ => unreachable!(),
                 };
                 let operand = self.parse_expr(10)?;
-                Expression::Prefix(op, Box::new(operand))
+                Expr::Prefix(op, Box::new(operand))
             }
             TokenType::Keyword(Keyword::Range) => {
                 self.advance();
                 let operand = self.parse_expr(10)?;
-                Expression::Range(Box::new(operand), None)
+                Expr::Range(Box::new(operand), None)
             }
             TokenType::Identifier => {
                 self.advance();
-                Expression::Identifier(token.as_string())
+                Expr::Identifier(token.as_string())
             }
             TokenType::IntegralNumber => {
                 self.advance();
-                Expression::Integer(token.get_integer().unwrap())
+                Expr::Integer(token.get_integer().unwrap())
             }
             TokenType::FloatingNumber => {
                 self.advance();
-                Expression::Float(token.get_float().unwrap())
+                Expr::Float(token.get_float().unwrap())
             }
             TokenType::Keyword(Keyword::True) => {
                 self.advance();
-                Expression::Bool(true)
+                Expr::Bool(true)
             }
             TokenType::Keyword(Keyword::False) => {
                 self.advance();
-                Expression::Bool(false)
+                Expr::Bool(false)
             }
             TokenType::Punct('(') => {
                 self.advance();
                 let values = self.parse_comma_separated_exprs()?;
                 self.expect_one(')')?;
                 match values.len() {
-                    1 => values.into_iter().next().unwrap(),
-                    _ => Expression::Tuple(values),
+                    1 => values.into_iter().next().unwrap().expr,
+                    _ => Expr::Tuple(values),
                 }
             }
             TokenType::Punct('[') => {
@@ -179,14 +179,14 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
                     values.push(self.parse_expr(0)?);
                     self.match_one(',');
                 }
-                Expression::Array(values)
+                Expr::Array(values)
             }
             _other => {
                 return Ok(None);
             }
         };
 
-        let mut expr = lhs;
+        let mut expr = self.make_tyexpr(lhs);
         loop {
             let token = self.peek(0);
 
@@ -197,7 +197,7 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
                 break;
             }
 
-            expr = match token.get_type() {
+            let next = match token.get_type() {
                 TokenType::Punct('+')
                 | TokenType::Punct('-')
                 | TokenType::Punct('*')
@@ -215,12 +215,12 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
                     };
 
                     let rhs = self.parse_expr(new_precedence)?;
-                    Expression::Infix(op, Box::new(expr), Box::new(rhs))
+                    Expr::Infix(op, Box::new(expr), Box::new(rhs))
                 }
                 TokenType::Punct('.') => {
                     self.advance();
                     let rhs = self.parse_expr(new_precedence)?;
-                    Expression::Place(Box::new(expr), Box::new(rhs))
+                    Expr::Place(Box::new(expr), Box::new(rhs))
                 }
                 TokenType::Punct('<')
                 | TokenType::Punct('>')
@@ -249,7 +249,7 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
                                 second.line(),
                                 second.column(),
                                 None,
-                            ))
+                            ));
                         }
                     };
                     if let Operator::Less | Operator::Greater = op {
@@ -259,22 +259,27 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
                         self.advance();
                     }
                     let rhs = self.parse_expr(new_precedence)?;
-                    Expression::Infix(op, Box::new(expr), Box::new(rhs))
+                    Expr::Infix(op, Box::new(expr), Box::new(rhs))
                 }
                 TokenType::Punct('(') => {
                     self.advance();
                     let args = self.parse_comma_separated_exprs()?;
                     self.expect_one(')')?;
-                    Expression::Call(Box::new(expr), args)
+                    Expr::Call(Box::new(expr), args)
                 }
                 _ => break,
             };
+            expr = self.make_tyexpr(next);
         }
 
         Ok(Some(expr))
     }
 
-    fn parse_comma_separated_exprs(&mut self) -> ParseResult<Vec<Expression>> {
+    fn make_tyexpr(&mut self, expr: Expr<'tcx>) -> TyExpr<'tcx> {
+        TyExpr { expr, ty: self.make_ty(TyS::Unknown) }
+    }
+
+    fn parse_comma_separated_exprs(&mut self) -> ParseResult<Vec<TyExpr<'tcx>>> {
         let mut values = vec![];
         loop {
             let value = self.parse_expr(0)?;
