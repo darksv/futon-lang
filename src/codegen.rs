@@ -312,6 +312,7 @@ fn ensure_ty_emitted<'tcx>(fmt: &mut SourceBuilder, emitted: &mut HashSet<Ty<'tc
         TyS::Range => {}
         TyS::Other(_) => {}
         TyS::Unknown => {}
+        TyS::Error => {}
     }
     emitted.insert(ty);
 }
@@ -331,6 +332,7 @@ fn format_ty(ty: Ty) -> Cow<str> {
         TyS::Bool => Cow::Borrowed("bool"),
         TyS::Range => Cow::Borrowed("/* generated */"),
         TyS::Unknown => Cow::Borrowed("/* unknown */"),
+        TyS::Error => Cow::Borrowed("/* error */"),
     }
 }
 

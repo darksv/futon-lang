@@ -13,6 +13,7 @@ pub(crate) enum TyS<'t> {
     Range,
     Other(String),
     Unknown,
+    Error,
 }
 
 pub(crate) type Ty<'tcx> = &'tcx TyS<'tcx>;

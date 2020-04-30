@@ -48,22 +48,16 @@ fn compile_file(path: impl AsRef<Path>) {
         Ok(ref mut k) => {
             let mut s = SourceBuilder::new();
             let mut locals = HashMap::new();
-            match infer_types(k, &arena, &mut locals, None) {
-                Ok(_) => {
-                    for item in k {
-                        let mir = build_mir(item).unwrap();
-                        dump_mir(&mir, &mut std::io::stdout()).unwrap();
-                        println!("evaluated: {:?}", execute_mir(&mir, &[Const::U32(300), Const::U32(1000), Const::U32(2100),]));
-                    }
-
-//                    codegen::genc(&mut s, k);
-//                    println!("// {}", path.as_ref().to_str().unwrap());
-//                    println!("{}", s.build());
-                }
-                Err(e) => {
-                    println!("typeck error: {}", e);
-                }
+            infer_types(k, &arena, &mut locals, None);
+            for item in k.iter_mut() {
+                let mir = build_mir(item).unwrap();
+                dump_mir(&mir, &mut std::io::stdout()).unwrap();
+                println!("evaluated: {:?}", execute_mir(&mir, &[Const::U32(300)]));
             }
+
+            // codegen::genc(&mut s, k);
+            // println!("// {}", path.as_ref().to_str().unwrap());
+            // println!("{}", s.build());
         }
         Err(e) => println!("{:?}", e),
     }
