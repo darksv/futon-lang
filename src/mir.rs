@@ -184,74 +184,78 @@ impl<'tcx> MirBuilder<'tcx> {
 fn visit_expr<'tcx>(
     expr: &TyExpr<'tcx>,
     builder: &mut MirBuilder<'tcx>,
-    stack: &mut Vec<Var>,
+    temporaries: &mut Vec<Var>,
     names: &HashMap<String, Var>,
     block: Block,
-) {
+) -> Var {
     match &expr.expr {
-        Expr::Identifier(id) => {
-            stack.push(names[id]);
+        Expr::Identifier(ident) => {
+            let var = names[ident];
+            temporaries.push(var);
+            var
         }
         Expr::Integer(val) => {
             let var = builder.make_var(expr.ty, None);
-            stack.push(var);
             builder.push(block, Instr::Const(var, Const::U32(*val as u32)));
+            temporaries.push(var);
+            var
         }
         Expr::Float(val) => {
             let var = builder.make_var(expr.ty, None);
-            stack.push(var);
             builder.push(block, Instr::Const(var, Const::F32(*val as f32)));
+            temporaries.push(var);
+            var
         }
         Expr::Bool(val) => {
             let var = builder.make_var(expr.ty, None);
-            stack.push(var);
             builder.push(block, Instr::Const(var, Const::Bool(*val)));
+            temporaries.push(var);
+            var
         }
         Expr::Prefix(op, rhs) => {
             let var = builder.make_var(expr.ty, None);
-            visit_expr(rhs, builder, stack, &names, block);
-            builder.push(block, Instr::UnaryOperation(var, *op, stack.pop().unwrap()));
-            stack.push(var);
+            let operand = visit_expr(rhs, builder, temporaries, &names, block);
+            builder.push(block, Instr::UnaryOperation(var, *op, operand));
+            temporaries.push(operand);
+            var
         }
         Expr::Infix(op, lhs, rhs) => {
             let var = builder.make_var(expr.ty, None);
-            visit_expr(lhs, builder, stack, &names, block);
-            visit_expr(rhs, builder, stack, &names, block);
-
-            let a = stack.pop().unwrap();
-            let b = stack.pop().unwrap();
-            builder.push(block, Instr::BinaryOperation(var, *op, b, a));
-            stack.push(var);
+            let a = visit_expr(lhs, builder, temporaries, &names, block);
+            let b = visit_expr(rhs, builder, temporaries, &names, block);
+            builder.push(block, Instr::BinaryOperation(var, *op, a, b));
+            temporaries.push(var);
+            var
         }
-        Expr::Array(items) => {
+        Expr::Array(elements) => {
             let var = builder.make_var(expr.ty, None);
-            for (index, item) in items.iter().enumerate() {
-                visit_expr(item, builder, stack, names, block);
-                builder.push(block, Instr::SetElement(var, index, stack.pop().unwrap()));
+            for (index, item) in elements.iter().enumerate() {
+                let expr = visit_expr(item, builder, temporaries, names, block);
+                builder.push(block, Instr::SetElement(var, index, expr));
             }
-            stack.push(var);
+            temporaries.push(var);
+            var
         }
-        Expr::Index(arr, index) => {
-            let ty = match arr.ty {
+        Expr::Index(slice, index) => {
+            let ty = match slice.ty {
                 TyS::Array(_, ty) => ty,
                 TyS::Slice(_) => unimplemented!(),
                 _ => unreachable!(),
             };
 
-            let arr_var = match &arr.expr {
+            let slice_var = match &slice.expr {
                 Expr::Identifier(ident) => names[ident],
                 _ => unimplemented!(),
             };
 
-            visit_expr(index, builder, stack, names, block);
+            let element_var = builder.make_var(ty, None);
+            let index_var = visit_expr(index, builder, temporaries, names, block);
+            builder.push(block, Instr::GetElement(element_var, slice_var, index_var));
 
-            let var = builder.make_var(ty, None);
-            builder.push(block, Instr::GetElement(var, arr_var, stack.pop().unwrap()));
-            stack.push(var);
+            temporaries.push(element_var);
+            element_var
         }
-        other => {
-            unimplemented!("{:?}", other);
-        }
+        Expr::Place(_, _) | Expr::Tuple(_) | Expr::Call(_, _) | Expr::Range(_, _) => unimplemented!()
     }
 }
 
@@ -393,10 +397,10 @@ pub(crate) fn execute_mir(mir: &Mir<'_>, args: &[Const]) -> Const {
                         match vars.get(src).copied() {
                             Some(var) => {
                                 vars.insert(*dst, var);
-                            },
+                            }
                             None => {
                                 let mut to_copy = vec![];
-                                for ((var, idx), _)  in vars_arrays.iter() {
+                                for ((var, idx), _) in vars_arrays.iter() {
                                     if var == src {
                                         to_copy.push(*idx);
                                     }
