@@ -95,7 +95,7 @@ fn deduce_expr_ty<'tcx>(
         }
         Expr::Array(items) => {
             if items.is_empty() {
-                panic!("cant deduce type of array items");
+                return arena.alloc(TyS::Unknown);
             }
 
             let first = deduce_expr_ty(&mut items[0], arena, locals);
@@ -154,6 +154,14 @@ fn deduce_expr_ty<'tcx>(
                 .map(|v| deduce_expr_ty(v, arena, locals))
                 .collect();
             arena.alloc(TyS::Tuple(types))
+        }
+        Expr::Index(arr, index_expr) => {
+            deduce_expr_ty(arr, arena, locals);
+            deduce_expr_ty(index_expr, arena, locals);
+            match arr.ty {
+                TyS::Array(length, ty) => ty,
+                other @ _ => unimplemented!("{:?}", &other),
+            }
         }
     };
     expr.ty = ty;

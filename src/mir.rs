@@ -1,4 +1,4 @@
-use crate::ty::Ty;
+use crate::ty::{Ty, TyS};
 use crate::ast::{Operator, Item, Expr, TyExpr};
 use std::{fmt, io};
 use std::io::Write;
@@ -26,6 +26,8 @@ enum Instr {
     Copy(Var, Var),
     UnaryOperation(Var, Operator, Var),
     BinaryOperation(Var, Operator, Var, Var),
+    SetElement(Var, usize, Var),
+    GetElement(Var, Var, Var),
 }
 
 impl fmt::Debug for Instr {
@@ -51,6 +53,12 @@ impl fmt::Debug for Instr {
                 Operator::Deref => "*",
                 _ => unimplemented!()
             }, a),
+            Instr::SetElement(arr, index, val) => {
+                write!(f, "{:?}[{}] = {:?}", arr, index, val)
+            }
+            Instr::GetElement(var, arr, index) => {
+                write!(f, "{:?} = {:?}[{:?}]", var, arr, index)
+            }
         }
     }
 }
@@ -215,6 +223,32 @@ fn visit_expr<'tcx>(
             builder.push(block, Instr::BinaryOperation(var, *op, b, a));
             stack.push(var);
         }
+        Expr::Array(items) => {
+            let var = builder.make_var(expr.ty, None);
+            for (index, item) in items.iter().enumerate() {
+                visit_expr(item, builder, stack, names, block);
+                builder.push(block, Instr::SetElement(var, index, stack.pop().unwrap()));
+            }
+            stack.push(var);
+        }
+        Expr::Index(arr, index) => {
+            let ty = match arr.ty {
+                TyS::Array(_, ty) => ty,
+                TyS::Slice(_) => unimplemented!(),
+                _ => unreachable!(),
+            };
+
+            let arr_var = match &arr.expr {
+                Expr::Identifier(ident) => names[ident],
+                _ => unimplemented!(),
+            };
+
+            visit_expr(index, builder, stack, names, block);
+
+            let var = builder.make_var(ty, None);
+            builder.push(block, Instr::GetElement(var, arr_var, stack.pop().unwrap()));
+            stack.push(var);
+        }
         other => {
             unimplemented!("{:?}", other);
         }
@@ -342,6 +376,7 @@ pub(crate) fn execute_mir(mir: &Mir<'_>, args: &[Const]) -> Const {
     let mut curr_block = 0;
     let mut curr_inst = 0;
     let mut vars: HashMap<Var, Const> = HashMap::new();
+    let mut vars_arrays: HashMap<(Var, usize), Const> = HashMap::new();
 
     for (idx, cnst) in args.iter().enumerate().take(mir.num_args) {
         vars.insert(Var(idx), *cnst);
@@ -355,7 +390,23 @@ pub(crate) fn execute_mir(mir: &Mir<'_>, args: &[Const]) -> Const {
                         vars.insert(*dst, *val);
                     }
                     Instr::Copy(dst, src) => {
-                        vars.insert(*dst, *vars.get(src).unwrap());
+                        match vars.get(src).copied() {
+                            Some(var) => {
+                                vars.insert(*dst, var);
+                            },
+                            None => {
+                                let mut to_copy = vec![];
+                                for ((var, idx), _)  in vars_arrays.iter() {
+                                    if var == src {
+                                        to_copy.push(*idx);
+                                    }
+                                }
+
+                                for to in to_copy {
+                                    vars_arrays.insert((*dst, to), vars_arrays[&(*src, to)]);
+                                }
+                            }
+                        }
                     }
                     Instr::UnaryOperation(dst, op, a) => {
                         let val = match (op, vars[a]) {
@@ -376,6 +427,16 @@ pub(crate) fn execute_mir(mir: &Mir<'_>, args: &[Const]) -> Const {
                             _ => unimplemented!(),
                         };
                         vars.insert(*dst, val);
+                    }
+                    Instr::SetElement(arr, index, val) => {
+                        vars_arrays.insert((*arr, *index), vars[val]);
+                    }
+                    Instr::GetElement(var, arr, index) => {
+                        let index = match vars[index] {
+                            Const::U32(v) => v as usize,
+                            other @ _ => unimplemented!("{:?}", other),
+                        };
+                        vars.insert(*var, vars_arrays[&(*arr, index)]);
                     }
                 }
                 curr_inst += 1;

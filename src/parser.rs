@@ -267,6 +267,12 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
                     self.expect_one(')')?;
                     Expr::Call(Box::new(expr), args)
                 }
+                TokenType::Punct('[') => {
+                    self.advance();
+                    let index_expr = self.parse_expr(0)?;
+                    self.expect_one(']')?;
+                    Expr::Index(Box::new(expr), Box::new(index_expr))
+                }
                 _ => break,
             };
             expr = self.make_tyexpr(next);

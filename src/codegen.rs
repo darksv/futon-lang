@@ -399,6 +399,9 @@ fn format_expr<'expr, 'tcx>(expr: &'expr TyExpr<'tcx>) -> Cow<'expr, str> {
         Expr::Bool(value) => Cow::Borrowed(if *value { "true" } else { "false" }),
         place @ Expr::Place(_, _) => format_place(expr),
         Expr::Range(_, _) => Cow::Borrowed("/* range */"),
+        Expr::Index(arr, index_exp) => {
+            todo!()
+        }
     }
 }
 

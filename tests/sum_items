@@ -1,0 +1,14 @@
+fn main(n: u32) -> u32 {
+    let sum = 0;
+    let items = [1, 2, 3, 4, 5];
+    let index = 0;
+    loop {
+        if index == 5 {
+            break;
+        }
+            sum += items[index];
+            index += 1;
+    }
+
+    return sum;
+}

@@ -42,6 +42,7 @@ pub(crate) enum Expr<'tcx> {
     Tuple(Vec<TyExpr<'tcx>>),
     Call(Box<TyExpr<'tcx>>, Vec<TyExpr<'tcx>>),
     Range(Box<TyExpr<'tcx>>, Option<Box<TyExpr<'tcx>>>),
+    Index(Box<TyExpr<'tcx>>, Box<TyExpr<'tcx>>),
 }
 
 #[derive(Debug, Clone)]
