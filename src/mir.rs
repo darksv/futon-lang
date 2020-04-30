@@ -184,56 +184,47 @@ impl<'tcx> MirBuilder<'tcx> {
 fn visit_expr<'tcx>(
     expr: &TyExpr<'tcx>,
     builder: &mut MirBuilder<'tcx>,
-    temporaries: &mut Vec<Var>,
     names: &HashMap<String, Var>,
     block: Block,
 ) -> Var {
     match &expr.expr {
         Expr::Identifier(ident) => {
-            let var = names[ident];
-            temporaries.push(var);
-            var
+            names[ident]
         }
         Expr::Integer(val) => {
             let var = builder.make_var(expr.ty, None);
             builder.push(block, Instr::Const(var, Const::U32(*val as u32)));
-            temporaries.push(var);
             var
         }
         Expr::Float(val) => {
             let var = builder.make_var(expr.ty, None);
             builder.push(block, Instr::Const(var, Const::F32(*val as f32)));
-            temporaries.push(var);
             var
         }
         Expr::Bool(val) => {
             let var = builder.make_var(expr.ty, None);
             builder.push(block, Instr::Const(var, Const::Bool(*val)));
-            temporaries.push(var);
             var
         }
         Expr::Prefix(op, rhs) => {
             let var = builder.make_var(expr.ty, None);
-            let operand = visit_expr(rhs, builder, temporaries, &names, block);
+            let operand = visit_expr(rhs, builder, &names, block);
             builder.push(block, Instr::UnaryOperation(var, *op, operand));
-            temporaries.push(operand);
             var
         }
         Expr::Infix(op, lhs, rhs) => {
             let var = builder.make_var(expr.ty, None);
-            let a = visit_expr(lhs, builder, temporaries, &names, block);
-            let b = visit_expr(rhs, builder, temporaries, &names, block);
+            let a = visit_expr(lhs, builder, &names, block);
+            let b = visit_expr(rhs, builder, &names, block);
             builder.push(block, Instr::BinaryOperation(var, *op, a, b));
-            temporaries.push(var);
             var
         }
         Expr::Array(elements) => {
             let var = builder.make_var(expr.ty, None);
             for (index, item) in elements.iter().enumerate() {
-                let expr = visit_expr(item, builder, temporaries, names, block);
+                let expr = visit_expr(item, builder, names, block);
                 builder.push(block, Instr::SetElement(var, index, expr));
             }
-            temporaries.push(var);
             var
         }
         Expr::Index(slice, index) => {
@@ -249,10 +240,8 @@ fn visit_expr<'tcx>(
             };
 
             let element_var = builder.make_var(ty, None);
-            let index_var = visit_expr(index, builder, temporaries, names, block);
+            let index_var = visit_expr(index, builder, names, block);
             builder.push(block, Instr::GetElement(element_var, slice_var, index_var));
-
-            temporaries.push(element_var);
             element_var
         }
         Expr::Place(_, _) | Expr::Tuple(_) | Expr::Call(_, _) | Expr::Range(_, _) => unimplemented!()
@@ -262,7 +251,6 @@ fn visit_expr<'tcx>(
 fn visit_item<'tcx>(
     item: &Item<'tcx>,
     builder: &mut MirBuilder<'tcx>,
-    temporaries: &mut Vec<Var>,
     local_names: &mut HashMap<String, Var>,
     ret: Option<Var>,
     after_loop: Option<Block>,
@@ -274,18 +262,16 @@ fn visit_item<'tcx>(
             local_names.insert(name.clone(), var);
 
             if let Some(expr) = expr {
-                visit_expr(expr, builder, temporaries, &local_names, *block);
+                let expr = visit_expr(expr, builder, &local_names, *block);
+                builder.push(*block, Instr::Copy(var, expr));
             }
-            builder.push(*block, Instr::Copy(var, temporaries.last().copied().unwrap()));
         }
         Item::Assignment { lhs, operator, expr } => {
-            visit_expr(expr, builder, temporaries, &local_names, *block);
+            let rhs = visit_expr(expr, builder, &local_names, *block);
             let lhs = match &lhs.expr {
                 Expr::Identifier(ident) => local_names[ident],
                 _ => unimplemented!(),
             };
-
-            let rhs = temporaries.pop().unwrap();
             if let Some(op) = operator {
                 builder.push(*block, Instr::BinaryOperation(lhs, *op, lhs, rhs));
             } else {
@@ -293,20 +279,19 @@ fn visit_item<'tcx>(
             }
         }
         Item::Expr { expr } => {
-            visit_expr(expr, builder, temporaries, &local_names, *block);
+            visit_expr(expr, builder, &local_names, *block);
         }
         Item::If { condition, arm_true, arm_false } => {
-            visit_expr(condition, builder, temporaries, &local_names, *block);
-            let var = *temporaries.last().unwrap();
+            let cond_var = visit_expr(condition, builder, &local_names, *block);
             let mut block_true = builder.block();
             for item in arm_true {
-                visit_item(item, builder, temporaries, local_names, ret, after_loop, &mut block_true);
+                visit_item(item, builder, local_names, ret, after_loop, &mut block_true);
             }
 
             let block_false = if let Some(arm_false) = arm_false {
                 let mut block_false = builder.block();
                 for item in arm_false {
-                    visit_item(item, builder, temporaries, local_names, ret, after_loop, &mut block_false);
+                    visit_item(item, builder, local_names, ret, after_loop, &mut block_false);
                 }
                 Some(block_false)
             } else {
@@ -315,12 +300,12 @@ fn visit_item<'tcx>(
             let next_block = builder.block();
 
             let block_false = if let Some(b) = block_false { b } else { next_block };
-            builder.set_terminator_of(*block, Terminator::JumpIf(var, block_true, block_false));
+            builder.set_terminator_of(*block, Terminator::JumpIf(cond_var, block_true, block_false));
             *block = next_block;
         }
         Item::Return(expr) => {
-            visit_expr(expr, builder, temporaries, &local_names, *block);
-            builder.push(*block, Instr::Copy(ret.unwrap(), temporaries.pop().unwrap()));
+            let var = visit_expr(expr, builder, &local_names, *block);
+            builder.push(*block, Instr::Copy(ret.unwrap(), var));
             builder.set_terminator_of(*block, Terminator::Return);
         }
         Item::Break => {
@@ -339,7 +324,7 @@ fn visit_item<'tcx>(
                     Item::Yield(_) => {}
                     Item::Return(_) => {}
                     other => {
-                        visit_item(other, builder, temporaries, local_names, ret, Some(after), &mut current);
+                        visit_item(other, builder, local_names, ret, Some(after), &mut current);
                         builder.set_terminator_of(current, Terminator::Jump(entry));
                     }
                 }
@@ -362,10 +347,9 @@ pub(crate) fn build_mir<'tcx>(item: &Item<'tcx>) -> Result<Mir<'tcx>, ()> {
             }
             let ret = builder.make_ret(ty);
 
-            let mut stack = vec![];
             let mut x = builder.block();
             for item in body {
-                visit_item(item, &mut builder, &mut stack, &mut names, Some(ret), None, &mut x);
+                visit_item(item, &mut builder, &mut names, Some(ret), None, &mut x);
             }
 
             return Ok(builder.build(name.to_owned()));
