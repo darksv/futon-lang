@@ -275,6 +275,16 @@ fn genc_item<'a, 'tcx: 'a>(
             fmt.unshift();
             fmt.writeln("}");
         }
+        Item::Block(body) => {
+            fmt.writeln("{{");
+
+            fmt.shift();
+            for item in body {
+                genc_item(fmt, item, vars, emitted_tys);
+            }
+            fmt.unshift();
+            fmt.writeln("}");
+        }
     }
 }
 

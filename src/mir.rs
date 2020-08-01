@@ -308,6 +308,72 @@ fn visit_item<'tcx>(
             builder.push(*block, Instr::Copy(ret.unwrap(), var));
             builder.set_terminator_of(*block, Terminator::Return);
         }
+        Item::ForIn { name, expr, body } => {
+            let (len, item_ty) = match expr.ty {
+                TyS::Array(len, ty) => (*len, *ty),
+                _ => unimplemented!(),
+            };
+
+            let items_id = String::from("_items");
+            let index_id = String::from("_x");
+
+            let items = vec![
+                Item::Let {
+                    name: items_id.clone(),
+                    ty: Some(expr.ty),
+                    expr: Some(expr.clone()),
+                },
+                Item::Let {
+                    name: index_id.clone(),
+                    ty: Some(&TyS::I32),
+                    expr: Some(TyExpr { ty: &TyS::I32, expr: Expr::Integer(0) }),
+                },
+                Item::Loop {
+                    body: {
+                        let mut items = vec![
+                            Item::If {
+                                condition: TyExpr {
+                                    ty: &TyS::Bool,
+                                    expr: Expr::Infix(
+                                        Operator::Equal,
+                                        Box::new(TyExpr { ty: &TyS::I32, expr: Expr::Integer(len as i64) }),
+                                        Box::new(TyExpr { ty: &TyS::I32, expr: Expr::Identifier(index_id.clone()) }),
+                                    ),
+                                },
+                                arm_true: vec![Item::Break],
+                                arm_false: None,
+                            },
+                            Item::Let {
+                                name: name.to_string(),
+                                ty: Some(item_ty),
+                                expr: Some(TyExpr {
+                                    ty: item_ty,
+                                    expr: Expr::Index(
+                                        Box::new(TyExpr { ty: expr.ty, expr: Expr::Identifier(items_id.clone()) }),
+                                        Box::new(TyExpr { ty: &TyS::U32, expr: Expr::Identifier(index_id.clone()) }),
+                                    )
+                                })
+                            }
+                        ];
+                        items.extend_from_slice(body);
+                        items.push(Item::Assignment {
+                            lhs: TyExpr { ty: &TyS::I32, expr: Expr::Identifier(index_id.clone()) },
+                            operator: None,
+                            expr: TyExpr {
+                                ty: &TyS::I32,
+                                expr: Expr::Infix(
+                                    Operator::Add,
+                                    Box::new(TyExpr { ty: &TyS::I32, expr: Expr::Identifier(index_id.clone()) }),
+                                    Box::new(TyExpr { ty: &TyS::I32, expr: Expr::Integer(1) }),
+                                )
+                            }
+                        });
+                        items
+                    }
+                }
+            ];
+            visit_item(&Item::Block(items), builder, local_names, ret, None, block);
+        }
         Item::Break => {
             builder.set_terminator_of(*block, Terminator::Jump(after_loop.unwrap()));
         }
@@ -331,6 +397,13 @@ fn visit_item<'tcx>(
             }
             builder.set_terminator_of(after, Terminator::Return);
             *block = after;
+        }
+        Item::Block(body) => {
+            // FIXME: build a new block?
+            for item in body {
+                visit_item(item, builder, local_names, ret, after_loop, block);
+            }
+
         }
         other => unimplemented!("{:?}", other),
     }

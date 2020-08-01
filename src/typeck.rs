@@ -283,6 +283,9 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
             }
             Item::Break => {}
             Item::Yield(_) => unimplemented!(),
+            Item::Block(body) => {
+                infer_types(body, arena, locals, expected_ret_ty);
+            }
         }
     }
 }

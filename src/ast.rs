@@ -1,12 +1,12 @@
 use crate::ty::Ty;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Argument<'tcx> {
     pub name: String,
     pub ty: Ty<'tcx>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Field<'tcx> {
     pub name: String,
     pub ty: Ty<'tcx>,
@@ -51,7 +51,7 @@ pub(crate) struct TyExpr<'tcx> {
     pub(crate) expr: Expr<'tcx>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum Item<'tcx> {
     Let {
         name: String,
@@ -93,4 +93,5 @@ pub(crate) enum Item<'tcx> {
     Break,
     Yield(Box<TyExpr<'tcx>>),
     Return(Box<TyExpr<'tcx>>),
+    Block(Vec<Item<'tcx>>),
 }
