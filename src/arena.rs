@@ -37,7 +37,7 @@ impl<T> Arena<T> {
             // 1. item behind this pointer is initialized
             // 2. there does not exist any shared reference to this item
             // 3. the backing storage is never reallocated
-            &*blocks.current.as_ptr().offset(offset as isize)
+            &*blocks.current.as_ptr().add(offset)
         }
     }
 

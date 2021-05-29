@@ -349,7 +349,7 @@ fn visit_item<'tcx>(
                                 expr: Some(TyExpr {
                                     ty: item_ty,
                                     expr: Expr::Index(
-                                        Box::new(TyExpr { ty: expr.ty, expr: Expr::Identifier(items_id.clone()) }),
+                                        Box::new(TyExpr { ty: expr.ty, expr: Expr::Identifier(items_id) }),
                                         Box::new(TyExpr { ty: &TyS::U32, expr: Expr::Identifier(index_id.clone()) }),
                                     )
                                 })
@@ -363,7 +363,7 @@ fn visit_item<'tcx>(
                                 ty: &TyS::I32,
                                 expr: Expr::Infix(
                                     Operator::Add,
-                                    Box::new(TyExpr { ty: &TyS::I32, expr: Expr::Identifier(index_id.clone()) }),
+                                    Box::new(TyExpr { ty: &TyS::I32, expr: Expr::Identifier(index_id) }),
                                     Box::new(TyExpr { ty: &TyS::I32, expr: Expr::Integer(1) }),
                                 )
                             }
@@ -495,7 +495,7 @@ pub(crate) fn execute_mir(mir: &Mir<'_>, args: &[Const]) -> Const {
                     Instr::GetElement(var, arr, index) => {
                         let index = match vars[index] {
                             Const::U32(v) => v as usize,
-                            other @ _ => unimplemented!("{:?}", other),
+                            other => unimplemented!("{:?}", other),
                         };
                         vars.insert(*var, vars_arrays[&(*arr, index)]);
                     }

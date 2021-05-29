@@ -471,9 +471,10 @@ impl<'a> Lexer<'a> {
     }
 
     fn advance_while_digits(&mut self) {
+        #[allow(clippy::while_let_loop)]
         loop {
             match self.peek(0) {
-                Some('0'..='9') | Some('_') => self.advance().unwrap(),
+                Some('0'..='9' | '_') => self.advance().unwrap(),
                 _ => break,
             };
         }

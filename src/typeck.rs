@@ -113,7 +113,7 @@ fn deduce_expr_ty<'tcx>(
             Expr::Identifier(ident) => {
                 let callee = locals
                     .get(ident.as_str())
-                    .expect(&format!("a type for {}", ident.as_str()));
+                    .unwrap_or_else(|| panic!("a type for {}", ident.as_str()));
                 let (args_ty, ret_ty) = match callee {
                     TyS::Function(args_ty, ret_ty) => (args_ty, ret_ty),
                     _ => {
@@ -159,8 +159,8 @@ fn deduce_expr_ty<'tcx>(
             deduce_expr_ty(arr, arena, locals);
             deduce_expr_ty(index_expr, arena, locals);
             match arr.ty {
-                TyS::Array(length, ty) => ty,
-                other @ _ => unimplemented!("{:?}", &other),
+                TyS::Array(_length, ty) => ty,
+                other  => unimplemented!("{:?}", &other),
             }
         }
     };

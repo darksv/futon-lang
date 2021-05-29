@@ -112,7 +112,7 @@ fn genc_item<'a, 'tcx: 'a>(
             ensure_ty_emitted(
                 fmt,
                 emitted_tys,
-                ty.expect(&format!("no type for {}", name)),
+                ty.unwrap_or_else(|| panic!("no type for {}", name)),
             );
             fmt.writeln(&format!(
                 "{} {} = {};",
@@ -120,7 +120,7 @@ fn genc_item<'a, 'tcx: 'a>(
                 name,
                 format_expr(expr.as_ref().unwrap())
             ));
-            vars.def(name.clone(), ty.clone().unwrap(), expr.clone());
+            vars.def(name.clone(), ty.unwrap(), expr.clone());
         }
         Item::Assignment {
             lhs,
@@ -333,7 +333,7 @@ fn format_ty(ty: Ty) -> Cow<str> {
         TyS::I32 => Cow::Borrowed("int32_t"),
         TyS::F32 => Cow::Borrowed("float"),
         TyS::Array(len, ty) => Cow::Owned(format!("{}[{}]", format_ty(ty), len)),
-        TyS::Slice(_) => Cow::Owned(format!("Slice")),
+        TyS::Slice(_) => Cow::Borrowed("Slice"),
         TyS::Other(name) => Cow::Borrowed(name.as_str()),
         TyS::Tuple(_) => Cow::Borrowed("/* generated */"),
         TyS::Unit => Cow::Borrowed("void)"),
@@ -407,7 +407,7 @@ fn format_expr<'expr, 'tcx>(expr: &'expr TyExpr<'tcx>) -> Cow<'expr, str> {
         }
         Expr::Tuple(_) => Cow::Borrowed("/* generated */"),
         Expr::Bool(value) => Cow::Borrowed(if *value { "true" } else { "false" }),
-        place @ Expr::Place(_, _) => format_place(expr),
+        Expr::Place(_, _) => format_place(expr),
         Expr::Range(_, _) => Cow::Borrowed("/* range */"),
         Expr::Index(arr, index_exp) => {
             todo!()

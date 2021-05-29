@@ -116,9 +116,9 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
     }
 
     fn parse_expr(&mut self, precedence: isize) -> ParseResult<TyExpr<'tcx>> {
-        Ok(self
+        self
             .parse_expr_opt(precedence)?
-            .ok_or(ParseError::Custom("missing expression"))?)
+            .ok_or(ParseError::Custom("missing expression"))
     }
 
     fn parse_expr_opt(&mut self, precedence: isize) -> ParseResult<Option<TyExpr<'tcx>>> {
@@ -310,8 +310,7 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
 
     fn is_left_associative(token: &Token) -> bool {
         match token.get_type() {
-            TokenType::Punct('-') => true,
-            TokenType::Punct('.') => true,
+            TokenType::Punct('-' | '.') => true,
             _ => false,
         }
     }
@@ -488,7 +487,7 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
         let items = self.parse_stmts()?;
         self.expect_one('}')?;
         Ok(Item::ForIn {
-            name: identifier.to_owned(),
+            name: identifier,
             expr,
             body: items,
         })

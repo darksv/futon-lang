@@ -1,3 +1,6 @@
+#![allow(clippy::match_like_matches_macro)]
+#![allow(unused)]
+
 mod arena;
 mod ast;
 mod codegen;
@@ -46,7 +49,7 @@ fn compile_file(path: impl AsRef<Path>) {
     let mut parser = Parser::new(lex, &arena);
     match parser.parse() {
         Ok(ref mut k) => {
-            let mut s = SourceBuilder::new();
+            // let mut s = SourceBuilder::new();
             let mut locals = HashMap::new();
             infer_types(k, &arena, &mut locals, None);
             for item in k.iter_mut() {
