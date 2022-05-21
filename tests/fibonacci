@@ -2,10 +2,11 @@ fn fib(a: i32) -> i32 {
     let n0: i32 = 0;
     let n1: i32 = 1;
 
-    for _ in range a {
+    for _ in range a to 10 {
         let n = n0;
         n0 = n1;
         n1 += n;
     }
+
     return n1;
 }

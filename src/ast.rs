@@ -1,4 +1,5 @@
 use crate::ty::Ty;
+use crate::mir::Var;
 
 #[derive(Debug, Clone)]
 pub(crate) struct Argument<'tcx> {
@@ -43,6 +44,7 @@ pub(crate) enum Expr<'tcx> {
     Call(Box<TyExpr<'tcx>>, Vec<TyExpr<'tcx>>),
     Range(Box<TyExpr<'tcx>>, Option<Box<TyExpr<'tcx>>>),
     Index(Box<TyExpr<'tcx>>, Box<TyExpr<'tcx>>),
+    Var(Var),
 }
 
 #[derive(Debug, Clone)]

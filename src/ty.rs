@@ -14,6 +14,7 @@ pub(crate) enum TyS<'t> {
     Other(String),
     Unknown,
     Error,
+    Any,
 }
 
 pub(crate) type Ty<'tcx> = &'tcx TyS<'tcx>;

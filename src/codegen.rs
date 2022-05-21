@@ -323,6 +323,7 @@ fn ensure_ty_emitted<'tcx>(fmt: &mut SourceBuilder, emitted: &mut HashSet<Ty<'tc
         TyS::Other(_) => {}
         TyS::Unknown => {}
         TyS::Error => {}
+        TyS::Any => {}
     }
     emitted.insert(ty);
 }
@@ -343,6 +344,7 @@ fn format_ty(ty: Ty) -> Cow<str> {
         TyS::Range => Cow::Borrowed("/* generated */"),
         TyS::Unknown => Cow::Borrowed("/* unknown */"),
         TyS::Error => Cow::Borrowed("/* error */"),
+        TyS::Any => unimplemented!(),
     }
 }
 
@@ -412,6 +414,7 @@ fn format_expr<'expr, 'tcx>(expr: &'expr TyExpr<'tcx>) -> Cow<'expr, str> {
         Expr::Index(arr, index_exp) => {
             todo!()
         }
+        Expr::Var(_) => unimplemented!()
     }
 }
 

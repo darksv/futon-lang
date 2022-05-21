@@ -42,7 +42,8 @@ keywords! {
     "break" => Break,
     "true" => True,
     "false" => False,
-    "in" => In
+    "in" => In,
+    "to" => To
 }
 
 /// Kind of punctuation mark

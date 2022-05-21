@@ -138,7 +138,12 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
             TokenType::Keyword(Keyword::Range) => {
                 self.advance();
                 let operand = self.parse_expr(10)?;
-                Expr::Range(Box::new(operand), None)
+                if self.match_keyword(Keyword::To).is_some() {
+                    let end = self.parse_expr(10)?;
+                    Expr::Range(Box::new(operand), Some(Box::new(end)))
+                } else {
+                    Expr::Range(Box::new(operand), None)
+                }
             }
             TokenType::Identifier => {
                 self.advance();

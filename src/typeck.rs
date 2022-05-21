@@ -38,6 +38,7 @@ fn is_compatible_to(ty: Ty<'_>, subty: Ty<'_>) -> bool {
         }
         (TyS::Pointer(ty1), TyS::Pointer(ty2)) => is_compatible_to(ty1, ty2),
         (TyS::Other(name1), TyS::Other(name2)) => name1 == name2,
+        (TyS::Any, _) | (_, TyS::Any) => true,
         _ => false,
     }
 }
@@ -109,31 +110,40 @@ fn deduce_expr_ty<'tcx>(
 
             arena.alloc(TyS::Array(items.len(), first))
         }
-        Expr::Call(callee, args) => match &mut callee.as_mut().expr {
-            Expr::Identifier(ident) => {
-                let callee = locals
-                    .get(ident.as_str())
-                    .unwrap_or_else(|| panic!("a type for {}", ident.as_str()));
-                let (args_ty, ret_ty) = match callee {
-                    TyS::Function(args_ty, ret_ty) => (args_ty, ret_ty),
-                    _ => {
-                        log::debug!("{} is not callable", ident.as_str());
-                        return arena.alloc(TyS::Error);
-                    },
-                };
-                for (arg, expected_ty) in args.iter_mut().zip(args_ty) {
-                    let arg_ty = deduce_expr_ty(arg, arena, locals);
+        Expr::Call(callee, args) => {
+            match &mut callee.as_mut().expr {
+                Expr::Identifier(ident) => {
+                    let callee_ty = match ident.as_str() {
+                        "debug" => {
+                            arena.alloc(TyS::Function(vec![&TyS::Any], &TyS::Unit))
+                        }
+                        other => {
+                            locals.get(other).unwrap_or_else(|| panic!("a type for {}", other))
+                        }
+                    };
 
-                    if !is_compatible_to(arg_ty, expected_ty) {
-                        log::debug!("incompatible types {:?} and {:?}",
+                    let (args_ty, ret_ty) = match callee_ty {
+                        TyS::Function(args_ty, ret_ty) => (args_ty, ret_ty),
+                        _ => {
+                            log::debug!("{} is not callable", ident.as_str());
+                            return arena.alloc(TyS::Error);
+                        }
+                    };
+
+                    for (arg, expected_ty) in args.iter_mut().zip(args_ty) {
+                        let arg_ty = deduce_expr_ty(arg, arena, locals);
+
+                        if !is_compatible_to(arg_ty, expected_ty) {
+                            log::debug!("incompatible types {:?} and {:?}",
                             arg_ty, expected_ty);
-                        return arena.alloc(TyS::Error);
+                            return arena.alloc(TyS::Error);
+                        }
                     }
+                    callee.ty = callee_ty;
+                    ret_ty
                 }
-
-                ret_ty
+                expr => unimplemented!("{:?}", expr),
             }
-            expr => unimplemented!("{:?}", expr),
         },
         Expr::Range(from, Some(to)) => {
             let from_ty = deduce_expr_ty(from, arena, locals);
@@ -160,9 +170,10 @@ fn deduce_expr_ty<'tcx>(
             deduce_expr_ty(index_expr, arena, locals);
             match arr.ty {
                 TyS::Array(_length, ty) => ty,
-                other  => unimplemented!("{:?}", &other),
+                other => unimplemented!("{:?}", &other),
             }
         }
+        Expr::Var(_) => unreachable!(),
     };
     expr.ty = ty;
     ty

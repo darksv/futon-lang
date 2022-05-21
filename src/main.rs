@@ -1,3 +1,4 @@
+#![feature(let_else)]
 #![allow(clippy::match_like_matches_macro)]
 #![allow(unused)]
 

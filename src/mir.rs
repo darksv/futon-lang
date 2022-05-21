@@ -5,7 +5,7 @@ use std::io::Write;
 use std::collections::HashMap;
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
-struct Var(usize);
+pub(crate) struct Var(usize);
 
 impl fmt::Debug for Var {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
@@ -28,6 +28,7 @@ enum Instr {
     BinaryOperation(Var, Operator, Var, Var),
     SetElement(Var, usize, Var),
     GetElement(Var, Var, Var),
+    Debug(Vec<Var>),
 }
 
 impl fmt::Debug for Instr {
@@ -58,6 +59,9 @@ impl fmt::Debug for Instr {
             }
             Instr::GetElement(var, arr, index) => {
                 write!(f, "{:?} = {:?}[{:?}]", var, arr, index)
+            }
+            Instr::Debug(args) => {
+                Ok(())
             }
         }
     }
@@ -244,7 +248,17 @@ fn visit_expr<'tcx>(
             builder.push(block, Instr::GetElement(element_var, slice_var, index_var));
             element_var
         }
-        Expr::Place(_, _) | Expr::Tuple(_) | Expr::Call(_, _) | Expr::Range(_, _) => unimplemented!()
+        Expr::Call(func, args) => {
+            let mut params = Vec::new();
+            for arg in args {
+                params.push(visit_expr(arg, builder, names, block));
+            }
+
+            builder.push(block, Instr::Debug(params));
+            builder.make_var(expr.ty, Some("Return of"))
+        }
+        Expr::Place(_, _) | Expr::Tuple(_) | Expr::Range(_, _) => unimplemented!(),
+        Expr::Var(var) => var.clone(),
     }
 }
 
@@ -309,70 +323,125 @@ fn visit_item<'tcx>(
             builder.set_terminator_of(*block, Terminator::Return);
         }
         Item::ForIn { name, expr, body } => {
-            let (len, item_ty) = match expr.ty {
-                TyS::Array(len, ty) => (*len, *ty),
-                _ => unimplemented!(),
-            };
+            match expr.ty {
+                &TyS::Array(len, item_ty) => {
+                    let items_id = String::from("_items");
+                    let index_id = String::from("_x");
 
-            let items_id = String::from("_items");
-            let index_id = String::from("_x");
+                    let items = vec![
+                        Item::Let {
+                            name: items_id.clone(),
+                            ty: Some(expr.ty),
+                            expr: Some(expr.clone()),
+                        },
+                        Item::Let {
+                            name: index_id.clone(),
+                            ty: Some(&TyS::I32),
+                            expr: Some(TyExpr { ty: &TyS::I32, expr: Expr::Integer(0) }),
+                        },
+                        Item::Loop {
+                            body: {
+                                let mut items = vec![
+                                    Item::If {
+                                        condition: TyExpr {
+                                            ty: &TyS::Bool,
+                                            expr: Expr::Infix(
+                                                Operator::Equal,
+                                                Box::new(TyExpr { ty: &TyS::I32, expr: Expr::Integer(len as i64) }),
+                                                Box::new(TyExpr { ty: &TyS::I32, expr: Expr::Identifier(index_id.clone()) }),
+                                            ),
+                                        },
+                                        arm_true: vec![Item::Break],
+                                        arm_false: None,
+                                    },
+                                    Item::Let {
+                                        name: name.to_string(),
+                                        ty: Some(item_ty),
+                                        expr: Some(TyExpr {
+                                            ty: item_ty,
+                                            expr: Expr::Index(
+                                                Box::new(TyExpr { ty: expr.ty, expr: Expr::Identifier(items_id) }),
+                                                Box::new(TyExpr { ty: &TyS::U32, expr: Expr::Identifier(index_id.clone()) }),
+                                            ),
+                                        }),
+                                    },
+                                ];
+                                items.extend_from_slice(body);
+                                items.push(Item::Assignment {
+                                    lhs: TyExpr { ty: &TyS::I32, expr: Expr::Identifier(index_id.clone()) },
+                                    operator: None,
+                                    expr: TyExpr {
+                                        ty: &TyS::I32,
+                                        expr: Expr::Infix(
+                                            Operator::Add,
+                                            Box::new(TyExpr { ty: &TyS::I32, expr: Expr::Identifier(index_id) }),
+                                            Box::new(TyExpr { ty: &TyS::I32, expr: Expr::Integer(1) }),
+                                        ),
+                                    },
+                                });
+                                items
+                            }
+                        },
+                    ];
 
-            let items = vec![
-                Item::Let {
-                    name: items_id.clone(),
-                    ty: Some(expr.ty),
-                    expr: Some(expr.clone()),
-                },
-                Item::Let {
-                    name: index_id.clone(),
-                    ty: Some(&TyS::I32),
-                    expr: Some(TyExpr { ty: &TyS::I32, expr: Expr::Integer(0) }),
-                },
-                Item::Loop {
-                    body: {
-                        let mut items = vec![
-                            Item::If {
-                                condition: TyExpr {
-                                    ty: &TyS::Bool,
-                                    expr: Expr::Infix(
-                                        Operator::Equal,
-                                        Box::new(TyExpr { ty: &TyS::I32, expr: Expr::Integer(len as i64) }),
-                                        Box::new(TyExpr { ty: &TyS::I32, expr: Expr::Identifier(index_id.clone()) }),
-                                    ),
-                                },
-                                arm_true: vec![Item::Break],
-                                arm_false: None,
-                            },
-                            Item::Let {
-                                name: name.to_string(),
-                                ty: Some(item_ty),
-                                expr: Some(TyExpr {
-                                    ty: item_ty,
-                                    expr: Expr::Index(
-                                        Box::new(TyExpr { ty: expr.ty, expr: Expr::Identifier(items_id) }),
-                                        Box::new(TyExpr { ty: &TyS::U32, expr: Expr::Identifier(index_id.clone()) }),
-                                    )
-                                })
-                            }
-                        ];
-                        items.extend_from_slice(body);
-                        items.push(Item::Assignment {
-                            lhs: TyExpr { ty: &TyS::I32, expr: Expr::Identifier(index_id.clone()) },
-                            operator: None,
-                            expr: TyExpr {
-                                ty: &TyS::I32,
-                                expr: Expr::Infix(
-                                    Operator::Add,
-                                    Box::new(TyExpr { ty: &TyS::I32, expr: Expr::Identifier(index_id) }),
-                                    Box::new(TyExpr { ty: &TyS::I32, expr: Expr::Integer(1) }),
-                                )
-                            }
-                        });
-                        items
-                    }
+                    visit_item(&Item::Block(items), builder, local_names, ret, None, block);
                 }
-            ];
-            visit_item(&Item::Block(items), builder, local_names, ret, None, block);
+                &TyS::Range => {
+                    let Expr::Range(start_expr, end_expr) = &expr.expr else {
+                        todo!();
+                    };
+                    let end_expr = end_expr.as_ref().unwrap();
+
+                    let start = visit_expr(start_expr, builder, local_names, *block);
+                    let end = visit_expr(end_expr, builder, local_names, *block);
+
+                    let index = name.clone();
+
+                    let items = vec![
+                        Item::Let {
+                            name: index.clone(),
+                            ty: Some(&TyS::I32),
+                            expr: Some(TyExpr { ty: &TyS::I32, expr: Expr::Integer(0) }),
+                        },
+
+                        Item::Loop {
+                            body: {
+                                let mut items = vec![
+                                    Item::If {
+                                        condition: TyExpr {
+                                            ty: &TyS::Bool,
+                                            expr: Expr::Infix(
+                                                Operator::Equal,
+                                                Box::new(TyExpr { ty: &TyS::I32, expr: Expr::Identifier(index.clone()) }),
+                                                Box::new(TyExpr { ty: &TyS::I32, expr: Expr::Var(end) }),
+                                            ),
+                                        },
+                                        arm_true: vec![Item::Break],
+                                        arm_false: None,
+                                    },
+                                ];
+                                items.extend_from_slice(body);
+                                items.push(Item::Assignment {
+                                    lhs: TyExpr { ty: &TyS::I32, expr: Expr::Identifier(index.clone()) },
+                                    operator: None,
+                                    expr: TyExpr {
+                                        ty: &TyS::I32,
+                                        expr: Expr::Infix(
+                                            Operator::Add,
+                                            Box::new(TyExpr { ty: &TyS::I32, expr: Expr::Identifier(index) }),
+                                            Box::new(TyExpr { ty: &TyS::I32, expr: Expr::Integer(1) }),
+                                        ),
+                                    },
+                                });
+                                items
+                            }
+                        },
+                    ];
+
+                    visit_item(&Item::Block(items), builder, local_names, ret, None, block);
+                }
+                other => unimplemented!("{:?}", other),
+            };
         }
         Item::Break => {
             builder.set_terminator_of(*block, Terminator::Jump(after_loop.unwrap()));
@@ -498,6 +567,11 @@ pub(crate) fn execute_mir(mir: &Mir<'_>, args: &[Const]) -> Const {
                             other => unimplemented!("{:?}", other),
                         };
                         vars.insert(*var, vars_arrays[&(*arr, index)]);
+                    }
+                    Instr::Debug(args) => {
+                        for (idx, arg) in args.iter().enumerate() {
+                            println!("#{} = {:?}", idx, vars[arg]);
+                        }
                     }
                 }
                 curr_inst += 1;

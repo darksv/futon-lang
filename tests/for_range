@@ -1,0 +1,8 @@
+fn mortile() -> i32 {
+    let sum: i32 = 0;
+    for x in range 1 to 10 {
+        sum += x;
+    }
+
+    return sum;
+}
