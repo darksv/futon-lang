@@ -19,6 +19,7 @@ pub(crate) enum Const {
     U32(u32),
     F32(f32),
     Bool(bool),
+    Undefined
 }
 
 enum Instr {
@@ -593,7 +594,10 @@ pub(crate) fn execute_mir(mir: &Mir<'_>, args: &[Const]) -> Const {
                 Terminator::Return => {
                     return vars[&Var(mir.num_args)];
                 }
-                Terminator::Unreachable => unreachable!(),
+                Terminator::Unreachable => {
+                    log::warn!("executing unreachable");
+                    return Const::Undefined;
+                },
             }
         }
     }
