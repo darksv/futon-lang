@@ -555,7 +555,10 @@ pub(crate) fn execute_mir(mir: &Mir<'_>, args: &[Const]) -> Const {
                             (Operator::Less, Const::U32(a), Const::U32(b)) => Const::Bool(a < b),
                             (Operator::Greater, Const::U32(a), Const::U32(b)) => Const::Bool(a > b),
                             (Operator::Equal, Const::U32(a), Const::U32(b)) => Const::Bool(a == b),
-                            _ => unimplemented!(),
+                            (Operator::NotEqual, Const::U32(a), Const::U32(b)) => Const::Bool(a != b),
+                            (Operator::LessEqual, Const::U32(a), Const::U32(b)) => Const::Bool(a <= b),
+                            (Operator::GreaterEqual, Const::U32(a), Const::U32(b)) => Const::Bool(a >= b),
+                            (op, a, b) => unimplemented!("{a:?} {op:?} {b:?}"),
                         };
                         vars.insert(*dst, val);
                     }
