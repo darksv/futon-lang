@@ -2,30 +2,29 @@ use std::collections::HashMap;
 
 use crate::arena::Arena;
 use crate::ast;
-use crate::ast::Type;
-use crate::mir::Var;
-use crate::ty::{Ty, TyS};
+use crate::ir::Var;
+use crate::types::{Type, TypeRef};
 
-fn is_compatible_to(ty: Ty<'_>, subty: Ty<'_>) -> bool {
+fn is_compatible_to(ty: TypeRef<'_>, subty: TypeRef<'_>) -> bool {
     match (ty, subty) {
-        (TyS::Bool, TyS::Bool) => true,
-        (TyS::U32, TyS::U32) => true,
-        (TyS::I32, TyS::I32) => true,
-        (TyS::F32, TyS::F32) => true,
-        (TyS::Array(len1, ty1), TyS::Array(len2, ty2)) => {
+        (Type::Bool, Type::Bool) => true,
+        (Type::U32, Type::U32) => true,
+        (Type::I32, Type::I32) => true,
+        (Type::F32, Type::F32) => true,
+        (Type::Array(len1, ty1), Type::Array(len2, ty2)) => {
             len1 == len2 && is_compatible_to(ty1, ty2)
         }
-        (TyS::Array(_, ty1), TyS::Slice(ty2)) => is_compatible_to(ty1, ty2),
-        (TyS::Slice(ty1), TyS::Slice(ty2)) => is_compatible_to(ty1, ty2),
-        (TyS::Unit, TyS::Unit) => true,
-        (TyS::Tuple(ty1), TyS::Tuple(ty2)) => {
+        (Type::Array(_, ty1), Type::Slice(ty2)) => is_compatible_to(ty1, ty2),
+        (Type::Slice(ty1), Type::Slice(ty2)) => is_compatible_to(ty1, ty2),
+        (Type::Unit, Type::Unit) => true,
+        (Type::Tuple(ty1), Type::Tuple(ty2)) => {
             ty1.len() == ty2.len()
                 && ty1
                 .iter()
                 .zip(ty2.iter())
                 .all(|(ty1, ty2)| is_compatible_to(ty1, ty2))
         }
-        (TyS::Function(args1, ret1), TyS::Function(args2, ret2)) => {
+        (Type::Function(args1, ret1), Type::Function(args2, ret2)) => {
             if args1.len() != args2.len() {
                 return false;
             }
@@ -39,16 +38,16 @@ fn is_compatible_to(ty: Ty<'_>, subty: Ty<'_>) -> bool {
                 .zip(args2.iter())
                 .all(|(ty1, ty2)| is_compatible_to(ty1, ty2))
         }
-        (TyS::Pointer(ty1), TyS::Pointer(ty2)) => is_compatible_to(ty1, ty2),
-        (TyS::Other(name1), TyS::Other(name2)) => name1 == name2,
-        (TyS::Any, _) | (_, TyS::Any) => true,
+        (Type::Pointer(ty1), Type::Pointer(ty2)) => is_compatible_to(ty1, ty2),
+        (Type::Other(name1), Type::Other(name2)) => name1 == name2,
+        (Type::Any, _) | (_, Type::Any) => true,
         _ => false,
     }
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct TypedExpression<'tcx> {
-    pub(crate) ty: Ty<'tcx>,
+    pub(crate) ty: TypeRef<'tcx>,
     pub(crate) expr: Expression<'tcx>,
 }
 
@@ -72,19 +71,19 @@ pub(crate) enum Expression<'tcx> {
 #[derive(Debug, Clone)]
 pub(crate) struct Argument<'tcx> {
     pub(crate) name: String,
-    pub(crate) ty: Ty<'tcx>,
+    pub(crate) ty: TypeRef<'tcx>,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) enum Item<'tcx> {
-    Let { name: String, ty: Ty<'tcx>, expr: Option<TypedExpression<'tcx>> },
+    Let { name: String, ty: TypeRef<'tcx>, expr: Option<TypedExpression<'tcx>> },
     Assignment { lhs: TypedExpression<'tcx>, operator: Option<ast::Operator>, expr: TypedExpression<'tcx> },
     Expression { expr: TypedExpression<'tcx> },
     Function {
         name: String,
         is_extern: bool,
         args: Vec<Argument<'tcx>>,
-        ty: Ty<'tcx>,
+        ty: TypeRef<'tcx>,
         body: Vec<Item<'tcx>>,
     },
     /*
@@ -114,19 +113,19 @@ pub(crate) enum Item<'tcx> {
 
 fn deduce_expr_ty<'tcx>(
     expr: &ast::Expression,
-    arena: &'tcx Arena<TyS<'tcx>>,
-    locals: &HashMap<&str, Ty<'tcx>>,
+    arena: &'tcx Arena<Type<'tcx>>,
+    locals: &HashMap<&str, TypeRef<'tcx>>,
 ) -> TypedExpression<'tcx> {
     match expr {
-        ast::Expression::Integer(val) => TypedExpression { expr: Expression::Integer(*val), ty: arena.alloc(TyS::I32) },
-        ast::Expression::Float(val) => TypedExpression { expr: Expression::Float(*val), ty: arena.alloc(TyS::F32) },
-        ast::Expression::Bool(val) => TypedExpression { expr: Expression::Bool(*val), ty: arena.alloc(TyS::Bool) },
+        ast::Expression::Integer(val) => TypedExpression { expr: Expression::Integer(*val), ty: arena.alloc(Type::I32) },
+        ast::Expression::Float(val) => TypedExpression { expr: Expression::Float(*val), ty: arena.alloc(Type::F32) },
+        ast::Expression::Bool(val) => TypedExpression { expr: Expression::Bool(*val), ty: arena.alloc(Type::Bool) },
         ast::Expression::Infix(op, lhs, rhs) => {
             let lhs = deduce_expr_ty(lhs, arena, &locals);
             let rhs = deduce_expr_ty(rhs, arena, &locals);
             let ty = if !is_compatible_to(lhs.ty, rhs.ty) {
                 log::debug!("mismatched types {:?} and {:?}", lhs.ty, rhs.ty);
-                arena.alloc(TyS::Error)
+                arena.alloc(Type::Error)
             } else {
                 match op {
                     ast::Operator::Less
@@ -134,7 +133,7 @@ fn deduce_expr_ty<'tcx>(
                     | ast::Operator::Greater
                     | ast::Operator::GreaterEqual
                     | ast::Operator::Equal
-                    | ast::Operator::NotEqual => arena.alloc(TyS::Bool),
+                    | ast::Operator::NotEqual => arena.alloc(Type::Bool),
                     ast::Operator::Add
                     | ast::Operator::Sub
                     | ast::Operator::Mul
@@ -153,7 +152,7 @@ fn deduce_expr_ty<'tcx>(
         ast::Expression::Prefix(op, expr) => {
             let inner = deduce_expr_ty(expr, arena, &locals);
             let ty = match op {
-                ast::Operator::Ref => arena.alloc(TyS::Pointer(inner.ty)),
+                ast::Operator::Ref => arena.alloc(Type::Pointer(inner.ty)),
                 ast::Operator::Deref => unimplemented!(),
                 _ => inner.ty,
             };
@@ -167,7 +166,7 @@ fn deduce_expr_ty<'tcx>(
                 ty
             } else {
                 log::debug!("no local {:?}", ident);
-                arena.alloc(TyS::Error)
+                arena.alloc(Type::Error)
             };
             TypedExpression {
                 expr: Expression::Identifier(ident.to_string()),
@@ -180,7 +179,7 @@ fn deduce_expr_ty<'tcx>(
         }
         ast::Expression::Array(items) => {
             if items.is_empty() {
-                return TypedExpression { expr: Expression::Error, ty: arena.alloc(TyS::Unknown) };
+                return TypedExpression { expr: Expression::Error, ty: arena.alloc(Type::Unknown) };
             }
 
             let mut values = Vec::new();
@@ -193,14 +192,14 @@ fn deduce_expr_ty<'tcx>(
                 let expr = deduce_expr_ty(next, arena, locals);
                 if !is_compatible_to(expr.ty, item_ty) {
                     log::debug!("incompatible types: {:?} and {:?}", expr.ty, item_ty);
-                    return TypedExpression { expr: Expression::Error, ty: arena.alloc(TyS::Error) };
+                    return TypedExpression { expr: Expression::Error, ty: arena.alloc(Type::Error) };
                 }
                 values.push(expr);
             }
 
             TypedExpression {
                 expr: Expression::Array(values),
-                ty: arena.alloc(TyS::Array(items.len(), item_ty)),
+                ty: arena.alloc(Type::Array(items.len(), item_ty)),
             }
         }
         ast::Expression::Call(callee, args) => {
@@ -209,7 +208,7 @@ fn deduce_expr_ty<'tcx>(
                 Expression::Identifier(ident) => {
                     let callee_ty = match ident.as_str() {
                         "debug" => {
-                            arena.alloc(TyS::Function(vec![&TyS::Any], &TyS::Unit))
+                            arena.alloc(Type::Function(vec![&Type::Any], &Type::Unit))
                         }
                         other => {
                             locals.get(other).unwrap_or_else(|| panic!("a type for {}", other))
@@ -217,10 +216,10 @@ fn deduce_expr_ty<'tcx>(
                     };
 
                     let (args_ty, ret_ty) = match callee_ty {
-                        TyS::Function(args_ty, ret_ty) => (args_ty, ret_ty),
+                        Type::Function(args_ty, ret_ty) => (args_ty, ret_ty),
                         _ => {
                             log::debug!("{} is not callable", ident.as_str());
-                            return TypedExpression { expr: Expression::Error, ty: arena.alloc(TyS::Error) };
+                            return TypedExpression { expr: Expression::Error, ty: arena.alloc(Type::Error) };
                         }
                     };
 
@@ -231,7 +230,7 @@ fn deduce_expr_ty<'tcx>(
 
                         if !is_compatible_to(arg.ty, expected_ty) {
                             log::debug!("incompatible types {:?} and {:?}", arg.ty, expected_ty);
-                            return TypedExpression { expr: Expression::Error, ty: arena.alloc(TyS::Error) };
+                            return TypedExpression { expr: Expression::Error, ty: arena.alloc(Type::Error) };
                         }
 
                         values.push(arg);
@@ -250,14 +249,14 @@ fn deduce_expr_ty<'tcx>(
             let to = deduce_expr_ty(to, arena, locals);
             if !is_compatible_to(from.ty, to.ty) {
                 log::debug!("incompatible range bounds");
-                return TypedExpression { expr: Expression::Error, ty: arena.alloc(TyS::Error) };
+                return TypedExpression { expr: Expression::Error, ty: arena.alloc(Type::Error) };
             }
             TypedExpression {
                 expr: Expression::Range(
                     Box::new(from),
                     Some(Box::new(to)),
                 ),
-                ty: arena.alloc(TyS::Range),
+                ty: arena.alloc(Type::Range),
             }
         }
         ast::Expression::Range(to, None) => {
@@ -273,16 +272,16 @@ fn deduce_expr_ty<'tcx>(
                 values.push(expr);
             }
 
-            TypedExpression { expr: Expression::Tuple(values), ty: arena.alloc(TyS::Tuple(types)) }
+            TypedExpression { expr: Expression::Tuple(values), ty: arena.alloc(Type::Tuple(types)) }
         }
         ast::Expression::Index(arr, index_expr) => {
             let lhs = deduce_expr_ty(arr, arena, locals);
             let rhs = deduce_expr_ty(index_expr, arena, locals);
 
             let ty = match (lhs.ty, rhs.ty) {
-                (TyS::Array(_, item_ty), TyS::I32) => item_ty,
-                (TyS::Slice(item_ty), TyS::I32) => item_ty,
-                _ => arena.alloc(TyS::Error),
+                (Type::Array(_, item_ty), Type::I32) => item_ty,
+                (Type::Slice(item_ty), Type::I32) => item_ty,
+                _ => arena.alloc(Type::Error),
             };
 
             TypedExpression {
@@ -296,9 +295,9 @@ fn deduce_expr_ty<'tcx>(
 
 pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
     items: &'ast [ast::Item],
-    arena: &'tcx Arena<TyS<'tcx>>,
-    locals: &mut HashMap<&'ast str, Ty<'tcx>>,
-    expected_ret_ty: Option<Ty<'tcx>>,
+    arena: &'tcx Arena<Type<'tcx>>,
+    locals: &mut HashMap<&'ast str, TypeRef<'tcx>>,
+    expected_ret_ty: Option<TypeRef<'tcx>>,
 ) -> Vec<Item<'tcx>> {
     let mut lowered_items = Vec::new();
 
@@ -360,7 +359,7 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
                     args.push(ty);
                 }
 
-                let func_ty = TyS::Function(args, unify(arena, ty));
+                let func_ty = Type::Function(args, unify(arena, ty));
                 let func_ty = arena.alloc(func_ty);
                 locals.insert(name.as_str(), func_ty);
 
@@ -383,7 +382,7 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
                 arm_false,
             } => {
                 let cond = deduce_expr_ty(condition, arena, &locals);
-                if !is_compatible_to(cond.ty, arena.alloc(TyS::Bool)) {
+                if !is_compatible_to(cond.ty, arena.alloc(Type::Bool)) {
                     log::debug!("only boolean expressions are allowed in if conditions");
                     continue;
                 }
@@ -400,15 +399,15 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
             ast::Item::ForIn { name, expr, body } => {
                 let expr = deduce_expr_ty(expr, arena, locals);
                 let is_iterable = match expr.ty {
-                    TyS::Array(_, _) | TyS::Slice(_) => true,
-                    TyS::Range => true,
+                    Type::Array(_, _) | Type::Slice(_) => true,
+                    Type::Range => true,
                     _ => false,
                 };
                 if !is_iterable {
                     log::debug!("{:?} is not iterable", expr.ty);
                     continue;
                 }
-                locals.insert(name.as_str(), arena.alloc(TyS::I32));
+                locals.insert(name.as_str(), arena.alloc(Type::I32));
                 let body = infer_types(body, arena, locals, expected_ret_ty);
                 Item::ForIn {
                     name: name.clone(),
@@ -455,13 +454,13 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
     lowered_items
 }
 
-fn unify<'tcx>(arena: &'tcx Arena<TyS<'tcx>>, ty: &ast::Type) -> Ty<'tcx> {
+fn unify<'tcx>(arena: &'tcx Arena<Type<'tcx>>, ty: &ast::Type) -> TypeRef<'tcx> {
     match ty {
         ast::Type::Name(name) => {
             match name.as_str() {
-                "i32" => arena.alloc(TyS::I32),
-                "u32" => arena.alloc(TyS::U32),
-                "bool" => arena.alloc(TyS::Bool),
+                "i32" => arena.alloc(Type::I32),
+                "u32" => arena.alloc(Type::U32),
+                "bool" => arena.alloc(Type::Bool),
                 oth => unimplemented!("{:?}", oth),
             }
         }
@@ -469,15 +468,15 @@ fn unify<'tcx>(arena: &'tcx Arena<TyS<'tcx>>, ty: &ast::Type) -> Ty<'tcx> {
             let types: Vec<_> = types.iter()
                 .map(|it| unify(arena, it))
                 .collect();
-            arena.alloc(TyS::Tuple(types))
+            arena.alloc(Type::Tuple(types))
         }
-        ast::Type::Pointer(ty) => arena.alloc(TyS::Pointer(unify(arena, ty))),
-        ast::Type::Array(len, ty) => arena.alloc(TyS::Array(*len, unify(arena, ty))),
-        ast::Type::Slice(item_ty) => arena.alloc(TyS::Slice(unify(arena, item_ty))),
-        ast::Type::Unit => arena.alloc(TyS::Unit),
+        ast::Type::Pointer(ty) => arena.alloc(Type::Pointer(unify(arena, ty))),
+        ast::Type::Array(len, ty) => arena.alloc(Type::Array(*len, unify(arena, ty))),
+        ast::Type::Slice(item_ty) => arena.alloc(Type::Slice(unify(arena, item_ty))),
+        ast::Type::Unit => arena.alloc(Type::Unit),
         ast::Type::Function(args_ty, ret_ty) => {
             let args = args_ty.iter().map(|it| unify(arena, it)).collect();
-            arena.alloc(TyS::Function(args, unify(arena, ret_ty)))
+            arena.alloc(Type::Function(args, unify(arena, ret_ty)))
         }
     }
 }

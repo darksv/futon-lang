@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use std::io::Write;
 
 use crate::{Arena, ast};
-use crate::ty::{Ty, TyS};
-use crate::typeck::{Expression, Item, TypedExpression};
+use crate::types::{TypeRef, Type};
+use crate::type_checking::{Expression, Item, TypedExpression};
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
 pub(crate) struct Var(usize);
@@ -101,7 +101,7 @@ enum Terminator {
 #[derive(Debug)]
 struct VarDef<'tcx> {
     name: Option<String>,
-    ty: Ty<'tcx>,
+    ty: TypeRef<'tcx>,
 }
 
 #[derive(Debug)]
@@ -111,7 +111,7 @@ struct BlockBody {
 }
 
 #[derive(Debug)]
-pub(crate) struct Mir<'tcx> {
+pub(crate) struct FunctionIr<'tcx> {
     name: String,
     num_args: usize,
     /// defines[0..num_args] == function args
@@ -123,18 +123,18 @@ pub(crate) struct Mir<'tcx> {
     blocks: Vec<BlockBody>,
 }
 
-pub(crate) fn dump_mir(mir: &Mir<'_>, f: &mut impl Write) -> io::Result<()> {
-    write!(f, "fn {}(", mir.name)?;
-    for (idx, it) in mir.defines.iter().enumerate().take(mir.num_args) {
+pub(crate) fn dump_ir(ir: &FunctionIr<'_>, f: &mut impl Write) -> io::Result<()> {
+    write!(f, "fn {}(", ir.name)?;
+    for (idx, it) in ir.defines.iter().enumerate().take(ir.num_args) {
         write!(f, "_{}: {:?}, ", idx, it.ty)?;
     }
-    writeln!(f, ") -> {:?} {{", mir.defines[mir.num_args].ty)?;
+    writeln!(f, ") -> {:?} {{", ir.defines[ir.num_args].ty)?;
 
-    for (idx, it) in mir.defines.iter().enumerate().skip(mir.num_args + 1) {
+    for (idx, it) in ir.defines.iter().enumerate().skip(ir.num_args + 1) {
         writeln!(f, "  let _{}: {:?}; // {}", idx, it.ty, &it.name.as_deref().unwrap_or(""))?;
     }
 
-    for (idx, block) in mir.blocks.iter().enumerate() {
+    for (idx, block) in ir.blocks.iter().enumerate() {
         writeln!(f, "  _bb{} {{", idx)?;
         for inst in &block.instrs {
             writeln!(f, "    {:?};", inst)?;
@@ -153,36 +153,36 @@ pub(crate) fn dump_mir(mir: &Mir<'_>, f: &mut impl Write) -> io::Result<()> {
     Ok(())
 }
 
-struct MirBuilder<'tcx> {
+struct IrBuilder<'tcx> {
     args: usize,
     vars: Vec<VarDef<'tcx>>,
     blocks: Vec<BlockBody>,
 }
 
-impl<'tcx> MirBuilder<'tcx> {
+impl<'tcx> IrBuilder<'tcx> {
     fn new() -> Self {
         Self { args: 0, vars: vec![], blocks: Default::default() }
     }
 
-    fn make_arg(&mut self, ty: Ty<'tcx>, name: Option<&str>) -> Var {
+    fn make_arg(&mut self, ty: TypeRef<'tcx>, name: Option<&str>) -> Var {
         assert_eq!(self.args, self.vars.len());
         self.args += 1;
         self.make_var(ty, name)
     }
 
-    fn make_ret(&mut self, ty: Ty<'tcx>) -> Var {
+    fn make_ret(&mut self, ty: TypeRef<'tcx>) -> Var {
         assert_eq!(self.args, self.vars.len());
         self.make_var(ty, None)
     }
 
-    fn make_var(&mut self, ty: Ty<'tcx>, name: Option<&str>) -> Var {
+    fn make_var(&mut self, ty: TypeRef<'tcx>, name: Option<&str>) -> Var {
         let var = Var(self.vars.len());
         self.vars.push(VarDef { ty, name: name.map(String::from) });
         var
     }
 
-    fn build(self, name: String) -> Mir<'tcx> {
-        Mir {
+    fn build(self, name: String) -> FunctionIr<'tcx> {
+        FunctionIr {
             name,
             num_args: self.args,
             defines: self.vars,
@@ -207,7 +207,7 @@ impl<'tcx> MirBuilder<'tcx> {
 
 fn visit_expr<'tcx>(
     expr: &TypedExpression<'tcx>,
-    builder: &mut MirBuilder<'tcx>,
+    builder: &mut IrBuilder<'tcx>,
     names: &HashMap<String, Var>,
     block: Block,
 ) -> Var {
@@ -253,8 +253,8 @@ fn visit_expr<'tcx>(
         }
         Expression::Index(slice, index) => {
             let ty = match slice.ty {
-                TyS::Array(_, ty) => ty,
-                TyS::Slice(_) => unimplemented!(),
+                Type::Array(_, ty) => ty,
+                Type::Slice(_) => unimplemented!(),
                 _ => unreachable!(),
             };
 
@@ -285,8 +285,8 @@ fn visit_expr<'tcx>(
 
 fn visit_item<'tcx>(
     item: &Item<'tcx>,
-    arena: &'tcx Arena<TyS<'tcx>>,
-    builder: &mut MirBuilder<'tcx>,
+    arena: &'tcx Arena<Type<'tcx>>,
+    builder: &mut IrBuilder<'tcx>,
     local_names: &mut HashMap<String, Var>,
     ret: Option<Var>,
     after_loop: Option<Block>,
@@ -346,7 +346,7 @@ fn visit_item<'tcx>(
         }
         Item::ForIn { name, expr, body } => {
             match expr.ty {
-                &TyS::Array(len, item_ty) => {
+                &Type::Array(len, item_ty) => {
                     let items_id = String::from("_items");
                     let index_id = String::from("_x");
 
@@ -359,19 +359,19 @@ fn visit_item<'tcx>(
                         },
                         Item::Let {
                             name: index_id.clone(),
-                            ty: arena.alloc(TyS::I32),
-                            expr: Some(TypedExpression { ty: &TyS::I32, expr: Expression::Integer(0) }),
+                            ty: arena.alloc(Type::I32),
+                            expr: Some(TypedExpression { ty: &Type::I32, expr: Expression::Integer(0) }),
                         },
                         Item::Loop {
                             body: {
                                 let mut items = vec![
                                     Item::If {
                                         condition: TypedExpression {
-                                            ty: &TyS::Bool,
+                                            ty: &Type::Bool,
                                             expr: Expression::Infix(
                                                 ast::Operator::Equal,
-                                                Box::new(TypedExpression { ty: &TyS::I32, expr: Expression::Integer(len as i64) }),
-                                                Box::new(TypedExpression { ty: &TyS::I32, expr: Expression::Identifier(index_id.clone()) }),
+                                                Box::new(TypedExpression { ty: &Type::I32, expr: Expression::Integer(len as i64) }),
+                                                Box::new(TypedExpression { ty: &Type::I32, expr: Expression::Identifier(index_id.clone()) }),
                                             ),
                                         },
                                         arm_true: vec![Item::Break],
@@ -384,21 +384,21 @@ fn visit_item<'tcx>(
                                             ty: item_ty,
                                             expr: Expression::Index(
                                                 Box::new(TypedExpression { ty: expr_ty, expr: Expression::Identifier(items_id) }),
-                                                Box::new(TypedExpression { ty: &TyS::U32, expr: Expression::Identifier(index_id.clone()) }),
+                                                Box::new(TypedExpression { ty: &Type::U32, expr: Expression::Identifier(index_id.clone()) }),
                                             ),
                                         }),
                                     },
                                 ];
                                 items.extend_from_slice(body);
                                 items.push(Item::Assignment {
-                                    lhs: TypedExpression { ty: &TyS::I32, expr: Expression::Identifier(index_id.clone()) },
+                                    lhs: TypedExpression { ty: &Type::I32, expr: Expression::Identifier(index_id.clone()) },
                                     operator: None,
                                     expr: TypedExpression {
-                                        ty: &TyS::I32,
+                                        ty: &Type::I32,
                                         expr: Expression::Infix(
                                             ast::Operator::Add,
-                                            Box::new(TypedExpression { ty: &TyS::I32, expr: Expression::Identifier(index_id) }),
-                                            Box::new(TypedExpression { ty: &TyS::I32, expr: Expression::Integer(1) }),
+                                            Box::new(TypedExpression { ty: &Type::I32, expr: Expression::Identifier(index_id) }),
+                                            Box::new(TypedExpression { ty: &Type::I32, expr: Expression::Integer(1) }),
                                         ),
                                     },
                                 });
@@ -409,7 +409,7 @@ fn visit_item<'tcx>(
 
                     visit_item(&Item::Block(items), arena, builder, local_names, ret, None, block);
                 }
-                &TyS::Range => {
+                &Type::Range => {
                     let Expression::Range(start_expr, end_expr) = &expr.expr else {
                         todo!();
                     };
@@ -423,19 +423,19 @@ fn visit_item<'tcx>(
                     let items = vec![
                         Item::Let {
                             name: index.clone(),
-                            ty: &TyS::I32,
-                            expr: Some(TypedExpression { ty: &TyS::I32, expr: Expression::Integer(0) }),
+                            ty: &Type::I32,
+                            expr: Some(TypedExpression { ty: &Type::I32, expr: Expression::Integer(0) }),
                         },
                         Item::Loop {
                             body: {
                                 let mut items = vec![
                                     Item::If {
                                         condition: TypedExpression {
-                                            ty: &TyS::Bool,
+                                            ty: &Type::Bool,
                                             expr: Expression::Infix(
                                                 ast::Operator::Equal,
-                                                Box::new(TypedExpression { ty: &TyS::I32, expr: Expression::Identifier(index.clone()) }),
-                                                Box::new(TypedExpression { ty: &TyS::I32, expr: Expression::Var(end) }),
+                                                Box::new(TypedExpression { ty: &Type::I32, expr: Expression::Identifier(index.clone()) }),
+                                                Box::new(TypedExpression { ty: &Type::I32, expr: Expression::Var(end) }),
                                             ),
                                         },
                                         arm_true: vec![Item::Break],
@@ -444,14 +444,14 @@ fn visit_item<'tcx>(
                                 ];
                                 items.extend_from_slice(body);
                                 items.push(Item::Assignment {
-                                    lhs: TypedExpression { ty: &TyS::I32, expr: Expression::Identifier(index.clone()) },
+                                    lhs: TypedExpression { ty: &Type::I32, expr: Expression::Identifier(index.clone()) },
                                     operator: None,
                                     expr: TypedExpression {
-                                        ty: &TyS::I32,
+                                        ty: &Type::I32,
                                         expr: Expression::Infix(
                                             ast::Operator::Add,
-                                            Box::new(TypedExpression { ty: &TyS::I32, expr: Expression::Identifier(index) }),
-                                            Box::new(TypedExpression { ty: &TyS::I32, expr: Expression::Integer(1) }),
+                                            Box::new(TypedExpression { ty: &Type::I32, expr: Expression::Identifier(index) }),
+                                            Box::new(TypedExpression { ty: &Type::I32, expr: Expression::Integer(1) }),
                                         ),
                                     },
                                 });
@@ -502,8 +502,8 @@ fn visit_item<'tcx>(
     }
 }
 
-pub(crate) fn build_mir<'tcx>(item: &Item<'tcx>, arena: &'tcx Arena<TyS<'tcx>>) -> Result<Mir<'tcx>, ()> {
-    let mut builder = MirBuilder::new();
+pub(crate) fn build_ir<'tcx>(item: &Item<'tcx>, arena: &'tcx Arena<Type<'tcx>>) -> Result<FunctionIr<'tcx>, ()> {
+    let mut builder = IrBuilder::new();
     match item {
         Item::Function { name, is_extern, args, ty, body } if !is_extern => {
             let mut names = HashMap::new();
@@ -520,24 +520,24 @@ pub(crate) fn build_mir<'tcx>(item: &Item<'tcx>, arena: &'tcx Arena<TyS<'tcx>>) 
 
             return Ok(builder.build(name.to_owned()));
         }
-        _ => eprintln!("trying generate mir of item that is not a function")
+        _ => eprintln!("trying generate ir of item that is not a function")
     }
     Err(())
 }
 
 
-pub(crate) fn execute_mir(mir: &Mir<'_>, args: &[Const]) -> Const {
+pub(crate) fn execute_ir(ir: &FunctionIr<'_>, args: &[Const]) -> Const {
     let mut curr_block = 0;
     let mut curr_inst = 0;
     let mut vars: HashMap<Var, Const> = HashMap::new();
     let mut vars_arrays: HashMap<(Var, usize), Const> = HashMap::new();
 
-    for (idx, cnst) in args.iter().enumerate().take(mir.num_args) {
+    for (idx, cnst) in args.iter().enumerate().take(ir.num_args) {
         vars.insert(Var(idx), *cnst);
     }
 
     loop {
-        match mir.blocks[curr_block].instrs.get(curr_inst) {
+        match ir.blocks[curr_block].instrs.get(curr_inst) {
             Some(instr) => {
                 match instr {
                     Instr::Const(dst, val) => {
@@ -614,7 +614,7 @@ pub(crate) fn execute_mir(mir: &Mir<'_>, args: &[Const]) -> Const {
                 }
                 curr_inst += 1;
             }
-            None => match mir.blocks[curr_block].terminator {
+            None => match ir.blocks[curr_block].terminator {
                 Terminator::Jump(block) => {
                     curr_block = block.0;
                     curr_inst = 0;
@@ -633,7 +633,7 @@ pub(crate) fn execute_mir(mir: &Mir<'_>, args: &[Const]) -> Const {
                     }
                 }
                 Terminator::Return => {
-                    return match vars.get(&Var(mir.num_args)) {
+                    return match vars.get(&Var(ir.num_args)) {
                         Some(x) => *x,
                         None => Const::Undefined
                     };

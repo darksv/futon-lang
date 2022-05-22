@@ -11,18 +11,18 @@ use parser::Parser;
 
 use crate::arena::Arena;
 use crate::ast::Operator;
-use crate::mir::{build_mir, Const, dump_mir, execute_mir};
-use crate::typeck::{Expression, infer_types, Item, TypedExpression};
+use crate::ir::{build_ir, Const, dump_ir, execute_ir};
+use crate::type_checking::{Expression, infer_types, Item, TypedExpression};
 
 mod arena;
 mod ast;
 // mod codegen;
 mod lexer;
-mod mir;
+mod ir;
 mod multi_peek;
 mod parser;
-mod ty;
-mod typeck;
+mod types;
+mod type_checking;
 
 fn main() {
     env_logger::init();
@@ -57,9 +57,9 @@ fn compile_file(path: impl AsRef<Path>) {
             for item in &items {
                 match item {
                     Item::Function { name, .. } => {
-                        let mir = build_mir(&item, &arena).unwrap();
-                        dump_mir(&mir, &mut std::io::stdout()).unwrap();
-                        functions.insert(name.clone(), mir);
+                        let ir = build_ir(&item, &arena).unwrap();
+                        dump_ir(&ir, &mut std::io::stdout()).unwrap();
+                        functions.insert(name.clone(), ir);
                     }
                     Item::Assert(expr) => {
                         asserts.push(expr);
@@ -83,7 +83,7 @@ fn compile_file(path: impl AsRef<Path>) {
 
                 let expected = rhs.expr.as_const().unwrap();
                 let args: Vec<_> = args.iter().map(|it| it.expr.as_const().unwrap()).collect();
-                let actual = execute_mir(&functions[name], &args);
+                let actual = execute_ir(&functions[name], &args);
                 println!("{:?} {:?}", expected, actual);
             }
         }
