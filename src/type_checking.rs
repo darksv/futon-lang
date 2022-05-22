@@ -64,6 +64,7 @@ pub(crate) enum Expression<'tcx> {
     Call(Box<TypedExpression<'tcx>>, Vec<TypedExpression<'tcx>>),
     Tuple(Vec<TypedExpression<'tcx>>),
     Range(Box<TypedExpression<'tcx>>, Option<Box<TypedExpression<'tcx>>>),
+    Cast(Box<TypedExpression<'tcx>>, TypeRef<'tcx>),
     Error,
     Var(Var),
 }
@@ -141,6 +142,7 @@ fn deduce_expr_ty<'tcx>(
                     ast::Operator::Negate => unimplemented!(),
                     ast::Operator::Ref => unimplemented!(),
                     ast::Operator::Deref => unimplemented!(),
+                    ast::Operator::As => unimplemented!(),
                 }
             };
 
@@ -290,6 +292,14 @@ fn deduce_expr_ty<'tcx>(
             }
         }
         ast::Expression::Var(_) => unreachable!(),
+        ast::Expression::Cast(expr, ty) => {
+            let expr = deduce_expr_ty(expr, arena, locals);
+            let target_ty = unify(arena, ty);
+            TypedExpression {
+                expr: Expression::Cast(Box::new(expr), target_ty),
+                ty: target_ty
+            }
+        }
     }
 }
 
@@ -460,6 +470,7 @@ fn unify<'tcx>(arena: &'tcx Arena<Type<'tcx>>, ty: &ast::Type) -> TypeRef<'tcx> 
             match name.as_str() {
                 "i32" => arena.alloc(Type::I32),
                 "u32" => arena.alloc(Type::U32),
+                "f32" => arena.alloc(Type::F32),
                 "bool" => arena.alloc(Type::Bool),
                 oth => unimplemented!("{:?}", oth),
             }

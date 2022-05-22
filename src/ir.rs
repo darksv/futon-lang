@@ -40,6 +40,11 @@ impl Expression<'_> {
     }
 }
 
+#[derive(Debug)]
+enum CastType {
+    Custom,
+}
+
 enum Instr {
     Const(Var, Const),
     Copy(Var, Var),
@@ -48,6 +53,7 @@ enum Instr {
     SetElement(Var, usize, Var),
     GetElement(Var, Var, Var),
     Debug(Vec<Var>),
+    Cast(Var, Var, CastType),
 }
 
 impl fmt::Debug for Instr {
@@ -79,6 +85,9 @@ impl fmt::Debug for Instr {
             }
             Instr::GetElement(var, arr, index) => {
                 write!(f, "{:?} = {:?}[{:?}]", var, arr, index)
+            }
+            Instr::Cast(left, right, mode) => {
+                write!(f, "{:?} = cast({:?}, {:?})", left, right, mode)
             }
             Instr::Debug(args) => {
                 Ok(())
@@ -280,6 +289,12 @@ fn visit_expr<'tcx>(
         Expression::Tuple(_) | Expression::Range(_, _) => Var::error(),
         Expression::Var(var) => var.clone(),
         Expression::Error => Var::error(),
+        Expression::Cast(expr, target_ty) => {
+            let var = builder.make_var(expr.ty, None);
+            let x = visit_expr(expr, builder, names, block);
+            builder.push(block, Instr::Cast(var, x, CastType::Custom));
+            var
+        }
     }
 }
 
@@ -587,6 +602,18 @@ pub(crate) fn execute_ir(ir: &FunctionIr<'_>, args: &[Const]) -> Const {
                             (ast::Operator::NotEqual, Const::U32(a), Const::U32(b)) => Const::Bool(a != b),
                             (ast::Operator::LessEqual, Const::U32(a), Const::U32(b)) => Const::Bool(a <= b),
                             (ast::Operator::GreaterEqual, Const::U32(a), Const::U32(b)) => Const::Bool(a >= b),
+
+                            (ast::Operator::Add, Const::F32(a), Const::F32(b)) => Const::F32(a + b),
+                            (ast::Operator::Mul, Const::F32(a), Const::F32(b)) => Const::F32(a * b),
+                            (ast::Operator::Sub, Const::F32(a), Const::F32(b)) => Const::F32(a - b),
+                            (ast::Operator::Div, Const::F32(a), Const::F32(b)) => Const::F32(a / b),
+                            (ast::Operator::Less, Const::F32(a), Const::F32(b)) => Const::Bool(a < b),
+                            (ast::Operator::Greater, Const::F32(a), Const::F32(b)) => Const::Bool(a > b),
+                            (ast::Operator::Equal, Const::F32(a), Const::F32(b)) => Const::Bool(a == b),
+                            (ast::Operator::NotEqual, Const::F32(a), Const::F32(b)) => Const::Bool(a != b),
+                            (ast::Operator::LessEqual, Const::F32(a), Const::F32(b)) => Const::Bool(a <= b),
+                            (ast::Operator::GreaterEqual, Const::F32(a), Const::F32(b)) => Const::Bool(a >= b),
+
                             (op, Const::Undefined, _) => Const::Undefined,
                             (op, _, Const::Undefined) => Const::Undefined,
                             (op, a, b) => {
@@ -605,6 +632,13 @@ pub(crate) fn execute_ir(ir: &FunctionIr<'_>, args: &[Const]) -> Const {
                             other => unimplemented!("{:?}", other),
                         };
                         vars.insert(*var, vars_arrays[&(*arr, index)]);
+                    }
+                    Instr::Cast(target, source, mode) => {
+                        let source = vars.get(source).copied().unwrap_or(Const::Undefined);
+                        vars.insert(*target, match (mode, source) {
+                            (_, Const::Undefined) => Const::Undefined,
+                            (CastType::Custom, _) => Const::Undefined,
+                        });
                     }
                     Instr::Debug(args) => {
                         for (idx, arg) in args.iter().enumerate() {

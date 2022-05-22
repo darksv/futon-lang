@@ -2,7 +2,7 @@ use crate::lexer::SourceSpan;
 use crate::types::TypeRef;
 use crate::ir::Var;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum Type {
     Name(String),
     Tuple(Vec<Type>),
@@ -40,6 +40,7 @@ pub(crate) enum Operator {
     Negate,
     Ref,
     Deref,
+    As,
 }
 
 #[derive(Debug, Clone)]
@@ -56,6 +57,7 @@ pub(crate) enum Expression {
     Call(Box<Expression>, Vec<Expression>),
     Range(Box<Expression>, Option<Box<Expression>>),
     Index(Box<Expression>, Box<Expression>),
+    Cast(Box<Expression>, Type),
     Var(Var),
 }
 

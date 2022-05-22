@@ -44,7 +44,8 @@ keywords! {
     "false" => False,
     "in" => In,
     "to" => To,
-    "assert" => Assert
+    "assert" => Assert,
+    "as" => As
 }
 
 /// Kind of punctuation mark

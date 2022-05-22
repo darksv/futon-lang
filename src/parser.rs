@@ -279,6 +279,11 @@ impl<'lex> Parser<'lex> {
                     self.expect_one(']')?;
                     ast::Expression::Index(Box::new(expr), Box::new(index_expr))
                 }
+                TokenType::Keyword(Keyword::As) => {
+                    self.advance();
+                    let ty = self.parse_ty()?;
+                    ast::Expression::Cast(Box::new(expr), ty)
+                }
                 _ => break,
             };
             expr = next;
