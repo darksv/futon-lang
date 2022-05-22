@@ -43,7 +43,8 @@ keywords! {
     "true" => True,
     "false" => False,
     "in" => In,
-    "to" => To
+    "to" => To,
+    "assert" => Assert
 }
 
 /// Kind of punctuation mark

@@ -50,6 +50,7 @@ impl<'lex> Parser<'lex> {
                 TokenType::Keyword(Keyword::Extern) => self.parse_fn(true),
                 TokenType::Keyword(Keyword::Fn) => self.parse_fn(false),
                 TokenType::Keyword(Keyword::Struct) => self.parse_struct(),
+                TokenType::Keyword(Keyword::Assert) => self.parse_assert(),
                 TokenType::EndOfSource => break,
                 token_type => unimplemented!("{:?}", token_type),
             };
@@ -288,8 +289,7 @@ impl<'lex> Parser<'lex> {
 
     fn parse_comma_separated_exprs(&mut self) -> ParseResult<Vec<ast::Expression>> {
         let mut values = vec![];
-        loop {
-            let value = self.parse_expr(0)?;
+        while let Some(value) = self.parse_expr_opt(0)? {
             values.push(value);
             if !self.match_one(',') {
                 break;
@@ -337,6 +337,13 @@ impl<'lex> Parser<'lex> {
             name: identifier,
             fields,
         })
+    }
+
+    fn parse_assert(&mut self) -> ParseResult<ast::Item> {
+        self.expect_keyword(Keyword::Assert)?;
+        let value = self.parse_expr(0)?;
+        self.expect_one(';')?;
+        Ok(Item::Assert(Box::new(value)))
     }
 
     fn parse_fn(&mut self, is_extern: bool) -> ParseResult<ast::Item> {

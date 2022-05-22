@@ -2,6 +2,18 @@
 #![allow(clippy::match_like_matches_macro)]
 #![allow(unused)]
 
+use std::collections::HashMap;
+use std::env;
+use std::path::Path;
+
+use lexer::{Keyword, Lexer, PunctKind, Token, TokenType};
+use parser::Parser;
+
+use crate::arena::Arena;
+use crate::ast::Operator;
+use crate::mir::{build_mir, Const, dump_mir, execute_mir};
+use crate::typeck::{Expression, infer_types, Item, TypedExpression};
+
 mod arena;
 mod ast;
 // mod codegen;
@@ -11,16 +23,6 @@ mod multi_peek;
 mod parser;
 mod ty;
 mod typeck;
-
-use crate::arena::Arena;
-use crate::typeck::infer_types;
-// use codegen::SourceBuilder;
-use lexer::{Keyword, Lexer, PunctKind, Token, TokenType};
-use parser::Parser;
-use std::collections::HashMap;
-use std::env;
-use std::path::Path;
-use crate::mir::{build_mir, dump_mir, execute_mir, Const};
 
 fn main() {
     env_logger::init();
@@ -39,30 +41,51 @@ fn main() {
 }
 
 fn compile_file(path: impl AsRef<Path>) {
-    use std::fs::File;
-    use std::io::prelude::*;
-    use std::io::BufReader;
-
-    let file = File::open(path.as_ref()).unwrap();
-    let mut content = String::new();
-    BufReader::new(file).read_to_string(&mut content).unwrap();
+    let content = std::fs::read(path.as_ref()).unwrap();
+    let content = String::from_utf8(content).unwrap();
 
     let lex = Lexer::from_source(&content);
     let arena = Arena::default();
     let mut parser = Parser::new(lex);
     match parser.parse() {
         Ok(ref mut k) => {
-            // let mut s = SourceBuilder::new();
             let mut locals = HashMap::new();
-            for item in infer_types(k, &arena, &mut locals, None) {
-                let mir = build_mir(&item, &arena).unwrap();
-                dump_mir(&mir, &mut std::io::stdout()).unwrap();
-                println!("evaluated: {:?}", execute_mir(&mir, &[Const::U32(300)]));
+
+            let items = infer_types(k, &arena, &mut locals, None);
+            let mut functions = HashMap::new();
+            let mut asserts = Vec::new();
+            for item in &items {
+                match item {
+                    Item::Function { name, .. } => {
+                        let mir = build_mir(&item, &arena).unwrap();
+                        dump_mir(&mir, &mut std::io::stdout()).unwrap();
+                        functions.insert(name.clone(), mir);
+                    }
+                    Item::Assert(expr) => {
+                        asserts.push(expr);
+                    }
+                    _ => (),
+                }
             }
 
-            // codegen::genc(&mut s, k);
-            // println!("// {}", path.as_ref().to_str().unwrap());
-            // println!("{}", s.build());
+            for assert in &asserts {
+                let Expression::Infix(Operator::Equal, lhs, rhs) = &assert.expr else {
+                    panic!("not a comparison");
+                };
+
+                let Expression::Call(fun, args) = &lhs.expr else {
+                    panic!("not a call");
+                };
+
+                let Expression::Identifier(name) = &fun.expr else {
+                    panic!("not a function call");
+                };
+
+                let expected = rhs.expr.as_const().unwrap();
+                let args: Vec<_> = args.iter().map(|it| it.expr.as_const().unwrap()).collect();
+                let actual = execute_mir(&functions[name], &args);
+                println!("{:?} {:?}", expected, actual);
+            }
         }
         Err(e) => println!("{:?}", e),
     }

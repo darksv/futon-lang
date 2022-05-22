@@ -109,6 +109,7 @@ pub(crate) enum Item<'tcx> {
     Yield(Box<TypedExpression<'tcx>>),
     Return(Box<TypedExpression<'tcx>>),
     Block(Vec<Item<'tcx>>),
+    Assert(Box<TypedExpression<'tcx>>),
 }
 
 fn deduce_expr_ty<'tcx>(
@@ -441,6 +442,10 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
             ast::Item::Block(body) => {
                 infer_types(body, arena, locals, expected_ret_ty);
                 todo!()
+            }
+            ast::Item::Assert(expr) => {
+                let expr = deduce_expr_ty(expr, arena, locals);
+                Item::Assert(Box::new(expr))
             }
         };
 

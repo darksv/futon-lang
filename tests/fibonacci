@@ -10,3 +10,5 @@ fn fib(a: i32) -> i32 {
 
     return n1;
 }
+
+assert fib(10) == 89;

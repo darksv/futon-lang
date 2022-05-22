@@ -30,6 +30,16 @@ pub(crate) enum Const {
     Undefined,
 }
 
+impl Expression<'_> {
+    pub(crate) fn as_const(&self) -> Option<Const> {
+        match self {
+            Expression::Integer(x) => Some(Const::U32(*x as _)),
+            Expression::Float(x) => Some(Const::F32(*x as _)),
+            _ => None,
+        }
+    }
+}
+
 enum Instr {
     Const(Var, Const),
     Copy(Var, Var),

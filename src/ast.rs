@@ -102,4 +102,5 @@ pub(crate) enum Item {
     Yield(Box<Expression>),
     Return(Box<Expression>),
     Block(Vec<Item>),
+    Assert(Box<Expression>),
 }
