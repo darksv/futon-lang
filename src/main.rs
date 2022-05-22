@@ -4,7 +4,7 @@
 
 mod arena;
 mod ast;
-mod codegen;
+// mod codegen;
 mod lexer;
 mod mir;
 mod multi_peek;
@@ -14,7 +14,7 @@ mod typeck;
 
 use crate::arena::Arena;
 use crate::typeck::infer_types;
-use codegen::SourceBuilder;
+// use codegen::SourceBuilder;
 use lexer::{Keyword, Lexer, PunctKind, Token, TokenType};
 use parser::Parser;
 use std::collections::HashMap;
@@ -31,7 +31,9 @@ fn main() {
         for entry in std::fs::read_dir("tests").unwrap() {
             let entry = entry.unwrap();
             println!("testing {:?}", entry.path());
-            compile_file(entry.path());
+            std::panic::catch_unwind(|| {
+                compile_file(entry.path());
+            });
         }
     }
 }
@@ -47,14 +49,13 @@ fn compile_file(path: impl AsRef<Path>) {
 
     let lex = Lexer::from_source(&content);
     let arena = Arena::default();
-    let mut parser = Parser::new(lex, &arena);
+    let mut parser = Parser::new(lex);
     match parser.parse() {
         Ok(ref mut k) => {
             // let mut s = SourceBuilder::new();
             let mut locals = HashMap::new();
-            infer_types(k, &arena, &mut locals, None);
-            for item in k.iter_mut() {
-                let mir = build_mir(item).unwrap();
+            for item in infer_types(k, &arena, &mut locals, None) {
+                let mir = build_mir(&item, &arena).unwrap();
                 dump_mir(&mir, &mut std::io::stdout()).unwrap();
                 println!("evaluated: {:?}", execute_mir(&mir, &[Const::U32(300)]));
             }

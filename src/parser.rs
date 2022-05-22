@@ -1,13 +1,14 @@
-use super::{Keyword, Lexer, PunctKind, Token, TokenType};
-use crate::arena::Arena;
-use crate::ast::{Argument, Expr, Field, Item, Operator, TyExpr};
-use crate::multi_peek::MultiPeek;
-use crate::ty::{Ty, TyS};
 use std::fmt;
 
-pub struct Parser<'lex, 'tcx> {
+use crate::arena::Arena;
+use crate::ast;
+use crate::ast::{Item, Type};
+use crate::multi_peek::MultiPeek;
+
+use super::{Keyword, Lexer, PunctKind, Token, TokenType};
+
+pub struct Parser<'lex> {
     peek: MultiPeek<Token<'lex>, Lexer<'lex>>,
-    ty: &'tcx Arena<TyS<'tcx>>,
 }
 
 pub enum ParseError {
@@ -34,15 +35,14 @@ impl fmt::Debug for ParseError {
 
 type ParseResult<T> = Result<T, ParseError>;
 
-impl<'lex, 'tcx> Parser<'lex, 'tcx> {
-    pub(crate) fn new(lex: Lexer<'lex>, arena: &'tcx Arena<TyS<'tcx>>) -> Parser<'lex, 'tcx> {
+impl<'lex> Parser<'lex> {
+    pub(crate) fn new(lex: Lexer<'lex>) -> Parser<'lex> {
         Parser {
             peek: MultiPeek::new(lex),
-            ty: arena,
         }
     }
 
-    pub(crate) fn parse(&mut self) -> ParseResult<Vec<Item<'tcx>>> {
+    pub(crate) fn parse(&mut self) -> ParseResult<Vec<ast::Item>> {
         let mut items = vec![];
         loop {
             let token = self.peek(0);
@@ -58,7 +58,7 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
         Ok(items)
     }
 
-    fn parse_stmts(&mut self) -> ParseResult<Vec<Item<'tcx>>> {
+    fn parse_stmts(&mut self) -> ParseResult<Vec<ast::Item>> {
         let mut items = vec![];
         loop {
             let token = self.peek(0);
@@ -74,7 +74,7 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
                 TokenType::Keyword(Keyword::Break) => {
                     self.advance();
                     self.expect_one(';')?;
-                    Ok(Item::Break)
+                    Ok(ast::Item::Break)
                 }
                 TokenType::Punct('*') => {
                     let lhs = self
@@ -85,7 +85,7 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
                 TokenType::Identifier => {
                     let lhs = self
                         .parse_expr_opt(0)?
-                        .unwrap_or_else(|| self.make_tyexpr(Expr::Identifier(token.as_string())));
+                        .unwrap_or_else(|| ast::Expression::Identifier(token.as_string()));
                     self.parse_assign_or_expr(lhs)
                 }
                 _ => break,
@@ -95,83 +95,83 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
         Ok(items)
     }
 
-    fn parse_assign_or_expr(&mut self, lhs: TyExpr<'tcx>) -> ParseResult<Item<'tcx>> {
+    fn parse_assign_or_expr(&mut self, lhs: ast::Expression) -> ParseResult<ast::Item> {
         let item = if self.match_many(&['+', '=']) {
-            Item::Assignment {
+            ast::Item::Assignment {
                 lhs,
-                operator: Some(Operator::Add),
+                operator: Some(ast::Operator::Add),
                 expr: self.parse_expr(0)?,
             }
         } else if self.match_one('=') {
-            Item::Assignment {
+            ast::Item::Assignment {
                 lhs,
                 operator: None,
                 expr: self.parse_expr(0)?,
             }
         } else {
-            Item::Expr { expr: lhs }
+            ast::Item::Expr { expr: lhs }
         };
         self.expect_one(';')?;
         Ok(item)
     }
 
-    fn parse_expr(&mut self, precedence: isize) -> ParseResult<TyExpr<'tcx>> {
+    fn parse_expr(&mut self, precedence: isize) -> ParseResult<ast::Expression> {
         self
             .parse_expr_opt(precedence)?
             .ok_or(ParseError::Custom("missing expression"))
     }
 
-    fn parse_expr_opt(&mut self, precedence: isize) -> ParseResult<Option<TyExpr<'tcx>>> {
+    fn parse_expr_opt(&mut self, precedence: isize) -> ParseResult<Option<ast::Expression>> {
         let token = self.peek(0);
         let lhs = match token.get_type() {
             TokenType::Punct('-') | TokenType::Punct('&') | TokenType::Punct('*') => {
                 self.advance();
                 let op = match token.get_type() {
-                    TokenType::Punct('-') => Operator::Negate,
-                    TokenType::Punct('&') => Operator::Ref,
-                    TokenType::Punct('*') => Operator::Deref,
+                    TokenType::Punct('-') => ast::Operator::Negate,
+                    TokenType::Punct('&') => ast::Operator::Ref,
+                    TokenType::Punct('*') => ast::Operator::Deref,
                     _ => unreachable!(),
                 };
                 let operand = self.parse_expr(10)?;
-                Expr::Prefix(op, Box::new(operand))
+                ast::Expression::Prefix(op, Box::new(operand))
             }
             TokenType::Keyword(Keyword::Range) => {
                 self.advance();
                 let operand = self.parse_expr(10)?;
                 if self.match_keyword(Keyword::To).is_some() {
                     let end = self.parse_expr(10)?;
-                    Expr::Range(Box::new(operand), Some(Box::new(end)))
+                    ast::Expression::Range(Box::new(operand), Some(Box::new(end)))
                 } else {
-                    Expr::Range(Box::new(operand), None)
+                    ast::Expression::Range(Box::new(operand), None)
                 }
             }
             TokenType::Identifier => {
                 self.advance();
-                Expr::Identifier(token.as_string())
+                ast::Expression::Identifier(token.as_string())
             }
             TokenType::IntegralNumber => {
                 self.advance();
-                Expr::Integer(token.get_integer().unwrap())
+                ast::Expression::Integer(token.get_integer().unwrap())
             }
             TokenType::FloatingNumber => {
                 self.advance();
-                Expr::Float(token.get_float().unwrap())
+                ast::Expression::Float(token.get_float().unwrap())
             }
             TokenType::Keyword(Keyword::True) => {
                 self.advance();
-                Expr::Bool(true)
+                ast::Expression::Bool(true)
             }
             TokenType::Keyword(Keyword::False) => {
                 self.advance();
-                Expr::Bool(false)
+                ast::Expression::Bool(false)
             }
             TokenType::Punct('(') => {
                 self.advance();
                 let values = self.parse_comma_separated_exprs()?;
                 self.expect_one(')')?;
                 match values.len() {
-                    1 => values.into_iter().next().unwrap().expr,
-                    _ => Expr::Tuple(values),
+                    1 => values.into_iter().next().unwrap(),
+                    _ => ast::Expression::Tuple(values),
                 }
             }
             TokenType::Punct('[') => {
@@ -184,14 +184,14 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
                     values.push(self.parse_expr(0)?);
                     self.match_one(',');
                 }
-                Expr::Array(values)
+                ast::Expression::Array(values)
             }
             _other => {
                 return Ok(None);
             }
         };
 
-        let mut expr = self.make_tyexpr(lhs);
+        let mut expr = lhs;
         loop {
             let token = self.peek(0);
 
@@ -212,20 +212,20 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
                     }
 
                     let op = match self.advance().get_type() {
-                        TokenType::Punct('+') => Operator::Add,
-                        TokenType::Punct('-') => Operator::Sub,
-                        TokenType::Punct('*') => Operator::Mul,
-                        TokenType::Punct('/') => Operator::Div,
+                        TokenType::Punct('+') => ast::Operator::Add,
+                        TokenType::Punct('-') => ast::Operator::Sub,
+                        TokenType::Punct('*') => ast::Operator::Mul,
+                        TokenType::Punct('/') => ast::Operator::Div,
                         _ => unreachable!(),
                     };
 
                     let rhs = self.parse_expr(new_precedence)?;
-                    Expr::Infix(op, Box::new(expr), Box::new(rhs))
+                    ast::Expression::Infix(op, Box::new(expr), Box::new(rhs))
                 }
                 TokenType::Punct('.') => {
                     self.advance();
                     let rhs = self.parse_expr(new_precedence)?;
-                    Expr::Place(Box::new(expr), Box::new(rhs))
+                    ast::Expression::Place(Box::new(expr), Box::new(rhs))
                 }
                 TokenType::Punct('<')
                 | TokenType::Punct('>')
@@ -238,15 +238,15 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
                         _ => false,
                     };
                     let op = match (first.get_type(), second.get_type(), is_joint) {
-                        (TokenType::Punct('<'), TokenType::Punct('='), true) => Operator::LessEqual,
-                        (TokenType::Punct('<'), TokenType::Punct('>'), true) => Operator::NotEqual,
+                        (TokenType::Punct('<'), TokenType::Punct('='), true) => ast::Operator::LessEqual,
+                        (TokenType::Punct('<'), TokenType::Punct('>'), true) => ast::Operator::NotEqual,
                         (TokenType::Punct('>'), TokenType::Punct('='), true) => {
-                            Operator::GreaterEqual
+                            ast::Operator::GreaterEqual
                         }
-                        (TokenType::Punct('<'), _, _) => Operator::Less,
-                        (TokenType::Punct('>'), _, _) => Operator::Greater,
-                        (TokenType::Punct('='), TokenType::Punct('='), true) => Operator::Equal,
-                        (TokenType::Punct('!'), TokenType::Punct('='), true) => Operator::NotEqual,
+                        (TokenType::Punct('<'), _, _) => ast::Operator::Less,
+                        (TokenType::Punct('>'), _, _) => ast::Operator::Greater,
+                        (TokenType::Punct('='), TokenType::Punct('='), true) => ast::Operator::Equal,
+                        (TokenType::Punct('!'), TokenType::Punct('='), true) => ast::Operator::NotEqual,
                         (TokenType::Punct('='), _, _) => return Ok(Some(expr)),
                         _ => {
                             return Err(ParseError::UnexpectedToken(
@@ -257,40 +257,36 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
                             ));
                         }
                     };
-                    if let Operator::Less | Operator::Greater = op {
+                    if let ast::Operator::Less | ast::Operator::Greater = op {
                         self.advance();
                     } else {
                         self.advance();
                         self.advance();
                     }
                     let rhs = self.parse_expr(new_precedence)?;
-                    Expr::Infix(op, Box::new(expr), Box::new(rhs))
+                    ast::Expression::Infix(op, Box::new(expr), Box::new(rhs))
                 }
                 TokenType::Punct('(') => {
                     self.advance();
                     let args = self.parse_comma_separated_exprs()?;
                     self.expect_one(')')?;
-                    Expr::Call(Box::new(expr), args)
+                    ast::Expression::Call(Box::new(expr), args)
                 }
                 TokenType::Punct('[') => {
                     self.advance();
                     let index_expr = self.parse_expr(0)?;
                     self.expect_one(']')?;
-                    Expr::Index(Box::new(expr), Box::new(index_expr))
+                    ast::Expression::Index(Box::new(expr), Box::new(index_expr))
                 }
                 _ => break,
             };
-            expr = self.make_tyexpr(next);
+            expr = next;
         }
 
         Ok(Some(expr))
     }
 
-    fn make_tyexpr(&mut self, expr: Expr<'tcx>) -> TyExpr<'tcx> {
-        TyExpr { expr, ty: self.make_ty(TyS::Unknown) }
-    }
-
-    fn parse_comma_separated_exprs(&mut self) -> ParseResult<Vec<TyExpr<'tcx>>> {
+    fn parse_comma_separated_exprs(&mut self) -> ParseResult<Vec<ast::Expression>> {
         let mut values = vec![];
         loop {
             let value = self.parse_expr(0)?;
@@ -320,7 +316,7 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
         }
     }
 
-    fn parse_struct(&mut self) -> ParseResult<Item<'tcx>> {
+    fn parse_struct(&mut self) -> ParseResult<ast::Item> {
         self.expect_keyword(Keyword::Struct)?;
         let identifier = self.expect_identifier()?.as_string();
         self.expect_one('{')?;
@@ -328,22 +324,22 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
         while let Some(t) = self.match_identifier() {
             self.expect_one(':')?;
             let ty = self.parse_ty()?;
-            fields.push(Field {
+            fields.push(ast::Field {
                 name: t.as_string(),
-                ty,
+                r#type: ty,
             });
             if !self.match_one(',') {
                 break;
             }
         }
         self.expect_one('}')?;
-        Ok(Item::Struct {
+        Ok(ast::Item::Struct {
             name: identifier,
             fields,
         })
     }
 
-    fn parse_fn(&mut self, is_extern: bool) -> ParseResult<Item<'tcx>> {
+    fn parse_fn(&mut self, is_extern: bool) -> ParseResult<ast::Item> {
         if is_extern {
             self.expect_keyword(Keyword::Extern)?;
         }
@@ -354,9 +350,9 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
         while let Some(t) = self.match_identifier() {
             self.expect_one(':')?;
             let ty = self.parse_ty()?;
-            args.push(Argument {
+            args.push(ast::Argument {
                 name: t.as_string(),
-                ty,
+                r#type: ty,
             });
             if !self.match_one(',') {
                 break;
@@ -367,7 +363,7 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
         let ty = if self.match_many(&['-', '>']) {
             self.parse_ty()?
         } else {
-            self.make_ty(TyS::Unit)
+            ast::Type::Unit
         };
 
         let body = if is_extern {
@@ -383,13 +379,13 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
         Ok(Item::Function {
             name: identifier,
             is_extern,
-            args,
+            params: args,
             body,
             ty,
         })
     }
 
-    fn parse_let(&mut self) -> ParseResult<Item<'tcx>> {
+    fn parse_let(&mut self) -> ParseResult<ast::Item> {
         self.expect_keyword(Keyword::Let)?;
         let identifier = self.expect_identifier()?.as_string();
         let ty = if self.match_one(':') {
@@ -408,12 +404,12 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
 
         Ok(Item::Let {
             name: identifier,
-            ty,
+            r#type: ty,
             expr,
         })
     }
 
-    fn parse_ty(&mut self) -> ParseResult<Ty<'tcx>> {
+    fn parse_ty(&mut self) -> ParseResult<ast::Type> {
         let token = self.advance();
         let ty = match token.get_type() {
             TokenType::Punct('[') => {
@@ -429,17 +425,12 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
                 self.expect_one(']')?;
                 let ty = self.parse_ty()?;
                 match length {
-                    Some(length) => Ok(TyS::Array(length, ty)),
-                    None => Ok(TyS::Slice(ty)),
+                    Some(length) => Ok(ast::Type::Array(length, Box::new(ty))),
+                    None => Ok(ast::Type::Slice(Box::new(ty))),
                 }
             }
-            TokenType::Punct('*') => Ok(TyS::Pointer(self.parse_ty()?)),
-            TokenType::Identifier => Ok(match token.as_slice() {
-                "bool" => TyS::Bool,
-                "i32" => TyS::I32,
-                "u32" => TyS::U32,
-                ud => TyS::Other(ud.to_string()),
-            }),
+            TokenType::Punct('*') => Ok(ast::Type::Pointer(Box::new(self.parse_ty()?))),
+            TokenType::Identifier => Ok(ast::Type::Name(token.as_string())),
             TokenType::Keyword(Keyword::Fn) => {
                 self.expect_one('(')?;
                 let args = self.parse_ty_tuple()?;
@@ -447,28 +438,21 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
                 let ret = if self.match_many(&['-', '>']) {
                     self.parse_ty()?
                 } else {
-                    self.make_ty(TyS::Unit)
+                    ast::Type::Unit
                 };
 
-                Ok(TyS::Function(args, ret))
+                Ok(ast::Type::Function(args, Box::new(ret)))
             }
             TokenType::Punct('(') => {
                 let types = self.parse_ty_tuple()?;
-                Ok(TyS::Tuple(types))
+                Ok(ast::Type::Tuple(types))
             }
             _ => unimplemented!(),
         };
-        ty.map(|ty| self.make_ty(ty))
+        ty
     }
 
-    fn make_ty(&self, ty: TyS<'tcx>) -> Ty<'tcx> {
-        if let Some(ty) = self.ty.find(&ty) {
-            return ty;
-        }
-        self.ty.alloc(ty)
-    }
-
-    fn parse_ty_tuple(&mut self) -> ParseResult<Vec<Ty<'tcx>>> {
+    fn parse_ty_tuple(&mut self) -> ParseResult<Vec<ast::Type>> {
         let mut args = vec![];
         loop {
             if self.match_one(')') {
@@ -483,7 +467,7 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
         Ok(args)
     }
 
-    fn parse_for(&mut self) -> ParseResult<Item<'tcx>> {
+    fn parse_for(&mut self) -> ParseResult<ast::Item> {
         self.expect_keyword(Keyword::For)?;
         let identifier = self.expect_identifier()?.as_string();
         self.expect_keyword(Keyword::In)?;
@@ -498,7 +482,7 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
         })
     }
 
-    fn parse_loop(&mut self) -> ParseResult<Item<'tcx>> {
+    fn parse_loop(&mut self) -> ParseResult<ast::Item> {
         self.expect_keyword(Keyword::Loop)?;
         self.expect_one('{')?;
         let items = self.parse_stmts()?;
@@ -506,7 +490,7 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
         Ok(Item::Loop { body: items })
     }
 
-    fn parse_if(&mut self) -> ParseResult<Item<'tcx>> {
+    fn parse_if(&mut self) -> ParseResult<ast::Item> {
         self.expect_keyword(Keyword::If)?;
         let condition = self.parse_expr(0)?;
         self.expect_one('{')?;
@@ -532,13 +516,13 @@ impl<'lex, 'tcx> Parser<'lex, 'tcx> {
         })
     }
 
-    fn parse_yield(&mut self) -> ParseResult<Item<'tcx>> {
+    fn parse_yield(&mut self) -> ParseResult<ast::Item> {
         self.expect_keyword(Keyword::Yield)?;
         let value = self.parse_expr(0)?;
         Ok(Item::Yield(Box::new(value)))
     }
 
-    fn parse_return(&mut self) -> ParseResult<Item<'tcx>> {
+    fn parse_return(&mut self) -> ParseResult<ast::Item> {
         self.expect_keyword(Keyword::Return)?;
         let value = self.parse_expr(0)?;
         self.expect_one(';')?;

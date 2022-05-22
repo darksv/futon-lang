@@ -1,11 +1,19 @@
-use crate::ty::{Ty, TyS};
-use crate::ast::{Operator, Item, Expr, TyExpr};
 use std::{fmt, io};
-use std::io::Write;
 use std::collections::HashMap;
+use std::io::Write;
+
+use crate::{Arena, ast};
+use crate::ty::{Ty, TyS};
+use crate::typeck::{Expression, Item, TypedExpression};
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
 pub(crate) struct Var(usize);
+
+impl Var {
+    fn error() -> Self {
+        Self(usize::MAX)
+    }
+}
 
 impl fmt::Debug for Var {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
@@ -19,14 +27,14 @@ pub(crate) enum Const {
     U32(u32),
     F32(f32),
     Bool(bool),
-    Undefined
+    Undefined,
 }
 
 enum Instr {
     Const(Var, Const),
     Copy(Var, Var),
-    UnaryOperation(Var, Operator, Var),
-    BinaryOperation(Var, Operator, Var, Var),
+    UnaryOperation(Var, ast::Operator, Var),
+    BinaryOperation(Var, ast::Operator, Var, Var),
     SetElement(Var, usize, Var),
     GetElement(Var, Var, Var),
     Debug(Vec<Var>),
@@ -38,22 +46,23 @@ impl fmt::Debug for Instr {
             Instr::Const(var, val) => write!(f, "{:?} = {:?}", var, val),
             Instr::Copy(lhs, rhs) => write!(f, "{:?} = {:?}", lhs, rhs),
             Instr::BinaryOperation(left, op, a, b) => write!(f, "{:?} = {:?} {} {:?}", left, a, match op {
-                Operator::Add => "+",
-                Operator::Sub => "-",
-                Operator::Mul => "*",
-                Operator::Div => "/",
-                Operator::Equal => "==",
-                Operator::NotEqual => "!=",
-                Operator::Less => "<",
-                Operator::LessEqual => "<=",
-                Operator::Greater => ">",
-                Operator::GreaterEqual => ">=",
+                ast::Operator::Add => "+",
+                ast::Operator::Sub => "-",
+                ast::Operator::Mul => "*",
+                ast::Operator::Div => "/",
+                ast::Operator::Equal => "==",
+                ast::Operator::NotEqual => "!=",
+                ast::Operator::Less => "<",
+                ast::Operator::LessEqual => "<=",
+                ast::Operator::Greater => ">",
+                ast::Operator::GreaterEqual => ">=",
                 _ => unimplemented!()
             }, b),
             Instr::UnaryOperation(left, op, a) => write!(f, "{:?} = {}{:?}", left, match op {
-                Operator::Negate => "-",
-                Operator::Deref => "*",
-                _ => unimplemented!()
+                ast::Operator::Negate => "-",
+                ast::Operator::Deref => "*",
+                ast::Operator::Ref => "&",
+                _ => unimplemented!("{:?}", op),
             }, a),
             Instr::SetElement(arr, index, val) => {
                 write!(f, "{:?}[{}] = {:?}", arr, index, val)
@@ -187,44 +196,44 @@ impl<'tcx> MirBuilder<'tcx> {
 }
 
 fn visit_expr<'tcx>(
-    expr: &TyExpr<'tcx>,
+    expr: &TypedExpression<'tcx>,
     builder: &mut MirBuilder<'tcx>,
     names: &HashMap<String, Var>,
     block: Block,
 ) -> Var {
     match &expr.expr {
-        Expr::Identifier(ident) => {
+        Expression::Identifier(ident) => {
             names[ident]
         }
-        Expr::Integer(val) => {
+        Expression::Integer(val) => {
             let var = builder.make_var(expr.ty, None);
             builder.push(block, Instr::Const(var, Const::U32(*val as u32)));
             var
         }
-        Expr::Float(val) => {
+        Expression::Float(val) => {
             let var = builder.make_var(expr.ty, None);
             builder.push(block, Instr::Const(var, Const::F32(*val as f32)));
             var
         }
-        Expr::Bool(val) => {
+        Expression::Bool(val) => {
             let var = builder.make_var(expr.ty, None);
             builder.push(block, Instr::Const(var, Const::Bool(*val)));
             var
         }
-        Expr::Prefix(op, rhs) => {
+        Expression::Prefix(op, rhs) => {
             let var = builder.make_var(expr.ty, None);
             let operand = visit_expr(rhs, builder, &names, block);
             builder.push(block, Instr::UnaryOperation(var, *op, operand));
             var
         }
-        Expr::Infix(op, lhs, rhs) => {
+        Expression::Infix(op, lhs, rhs) => {
             let var = builder.make_var(expr.ty, None);
             let a = visit_expr(lhs, builder, &names, block);
             let b = visit_expr(rhs, builder, &names, block);
             builder.push(block, Instr::BinaryOperation(var, *op, a, b));
             var
         }
-        Expr::Array(elements) => {
+        Expression::Array(elements) => {
             let var = builder.make_var(expr.ty, None);
             for (index, item) in elements.iter().enumerate() {
                 let expr = visit_expr(item, builder, names, block);
@@ -232,7 +241,7 @@ fn visit_expr<'tcx>(
             }
             var
         }
-        Expr::Index(slice, index) => {
+        Expression::Index(slice, index) => {
             let ty = match slice.ty {
                 TyS::Array(_, ty) => ty,
                 TyS::Slice(_) => unimplemented!(),
@@ -240,7 +249,7 @@ fn visit_expr<'tcx>(
             };
 
             let slice_var = match &slice.expr {
-                Expr::Identifier(ident) => names[ident],
+                Expression::Identifier(ident) => names[ident],
                 _ => unimplemented!(),
             };
 
@@ -249,7 +258,7 @@ fn visit_expr<'tcx>(
             builder.push(block, Instr::GetElement(element_var, slice_var, index_var));
             element_var
         }
-        Expr::Call(func, args) => {
+        Expression::Call(func, args) => {
             let mut params = Vec::new();
             for arg in args {
                 params.push(visit_expr(arg, builder, names, block));
@@ -258,13 +267,15 @@ fn visit_expr<'tcx>(
             builder.push(block, Instr::Debug(params));
             builder.make_var(expr.ty, Some("Return of"))
         }
-        Expr::Place(_, _) | Expr::Tuple(_) | Expr::Range(_, _) => unimplemented!(),
-        Expr::Var(var) => var.clone(),
+        Expression::Tuple(_) | Expression::Range(_, _) => Var::error(),
+        Expression::Var(var) => var.clone(),
+        Expression::Error => Var::error(),
     }
 }
 
 fn visit_item<'tcx>(
     item: &Item<'tcx>,
+    arena: &'tcx Arena<TyS<'tcx>>,
     builder: &mut MirBuilder<'tcx>,
     local_names: &mut HashMap<String, Var>,
     ret: Option<Var>,
@@ -273,7 +284,7 @@ fn visit_item<'tcx>(
 ) {
     match item {
         Item::Let { name, ty, expr } => {
-            let var = builder.make_var(ty.unwrap(), Some(name.as_str()));
+            let var = builder.make_var(ty, Some(name.as_str()));
             local_names.insert(name.clone(), var);
 
             if let Some(expr) = expr {
@@ -284,7 +295,7 @@ fn visit_item<'tcx>(
         Item::Assignment { lhs, operator, expr } => {
             let rhs = visit_expr(expr, builder, &local_names, *block);
             let lhs = match &lhs.expr {
-                Expr::Identifier(ident) => local_names[ident],
+                Expression::Identifier(ident) => local_names[ident],
                 _ => unimplemented!(),
             };
             if let Some(op) = operator {
@@ -293,20 +304,20 @@ fn visit_item<'tcx>(
                 builder.push(*block, Instr::Copy(lhs, rhs));
             }
         }
-        Item::Expr { expr } => {
+        Item::Expression { expr } => {
             visit_expr(expr, builder, &local_names, *block);
         }
         Item::If { condition, arm_true, arm_false } => {
             let cond_var = visit_expr(condition, builder, &local_names, *block);
             let mut block_true = builder.block();
             for item in arm_true {
-                visit_item(item, builder, local_names, ret, after_loop, &mut block_true);
+                visit_item(item, arena, builder, local_names, ret, after_loop, &mut block_true);
             }
 
             let block_false = if let Some(arm_false) = arm_false {
                 let mut block_false = builder.block();
                 for item in arm_false {
-                    visit_item(item, builder, local_names, ret, after_loop, &mut block_false);
+                    visit_item(item, arena, builder, local_names, ret, after_loop, &mut block_false);
                 }
                 Some(block_false)
             } else {
@@ -329,27 +340,28 @@ fn visit_item<'tcx>(
                     let items_id = String::from("_items");
                     let index_id = String::from("_x");
 
+                    let expr_ty = expr.ty;
                     let items = vec![
                         Item::Let {
                             name: items_id.clone(),
-                            ty: Some(expr.ty),
+                            ty: expr_ty,
                             expr: Some(expr.clone()),
                         },
                         Item::Let {
                             name: index_id.clone(),
-                            ty: Some(&TyS::I32),
-                            expr: Some(TyExpr { ty: &TyS::I32, expr: Expr::Integer(0) }),
+                            ty: arena.alloc(TyS::I32),
+                            expr: Some(TypedExpression { ty: &TyS::I32, expr: Expression::Integer(0) }),
                         },
                         Item::Loop {
                             body: {
                                 let mut items = vec![
                                     Item::If {
-                                        condition: TyExpr {
+                                        condition: TypedExpression {
                                             ty: &TyS::Bool,
-                                            expr: Expr::Infix(
-                                                Operator::Equal,
-                                                Box::new(TyExpr { ty: &TyS::I32, expr: Expr::Integer(len as i64) }),
-                                                Box::new(TyExpr { ty: &TyS::I32, expr: Expr::Identifier(index_id.clone()) }),
+                                            expr: Expression::Infix(
+                                                ast::Operator::Equal,
+                                                Box::new(TypedExpression { ty: &TyS::I32, expr: Expression::Integer(len as i64) }),
+                                                Box::new(TypedExpression { ty: &TyS::I32, expr: Expression::Identifier(index_id.clone()) }),
                                             ),
                                         },
                                         arm_true: vec![Item::Break],
@@ -357,26 +369,26 @@ fn visit_item<'tcx>(
                                     },
                                     Item::Let {
                                         name: name.to_string(),
-                                        ty: Some(item_ty),
-                                        expr: Some(TyExpr {
+                                        ty: item_ty,
+                                        expr: Some(TypedExpression {
                                             ty: item_ty,
-                                            expr: Expr::Index(
-                                                Box::new(TyExpr { ty: expr.ty, expr: Expr::Identifier(items_id) }),
-                                                Box::new(TyExpr { ty: &TyS::U32, expr: Expr::Identifier(index_id.clone()) }),
+                                            expr: Expression::Index(
+                                                Box::new(TypedExpression { ty: expr_ty, expr: Expression::Identifier(items_id) }),
+                                                Box::new(TypedExpression { ty: &TyS::U32, expr: Expression::Identifier(index_id.clone()) }),
                                             ),
                                         }),
                                     },
                                 ];
                                 items.extend_from_slice(body);
                                 items.push(Item::Assignment {
-                                    lhs: TyExpr { ty: &TyS::I32, expr: Expr::Identifier(index_id.clone()) },
+                                    lhs: TypedExpression { ty: &TyS::I32, expr: Expression::Identifier(index_id.clone()) },
                                     operator: None,
-                                    expr: TyExpr {
+                                    expr: TypedExpression {
                                         ty: &TyS::I32,
-                                        expr: Expr::Infix(
-                                            Operator::Add,
-                                            Box::new(TyExpr { ty: &TyS::I32, expr: Expr::Identifier(index_id) }),
-                                            Box::new(TyExpr { ty: &TyS::I32, expr: Expr::Integer(1) }),
+                                        expr: Expression::Infix(
+                                            ast::Operator::Add,
+                                            Box::new(TypedExpression { ty: &TyS::I32, expr: Expression::Identifier(index_id) }),
+                                            Box::new(TypedExpression { ty: &TyS::I32, expr: Expression::Integer(1) }),
                                         ),
                                     },
                                 });
@@ -385,10 +397,10 @@ fn visit_item<'tcx>(
                         },
                     ];
 
-                    visit_item(&Item::Block(items), builder, local_names, ret, None, block);
+                    visit_item(&Item::Block(items), arena, builder, local_names, ret, None, block);
                 }
                 &TyS::Range => {
-                    let Expr::Range(start_expr, end_expr) = &expr.expr else {
+                    let Expression::Range(start_expr, end_expr) = &expr.expr else {
                         todo!();
                     };
                     let end_expr = end_expr.as_ref().unwrap();
@@ -401,20 +413,19 @@ fn visit_item<'tcx>(
                     let items = vec![
                         Item::Let {
                             name: index.clone(),
-                            ty: Some(&TyS::I32),
-                            expr: Some(TyExpr { ty: &TyS::I32, expr: Expr::Integer(0) }),
+                            ty: &TyS::I32,
+                            expr: Some(TypedExpression { ty: &TyS::I32, expr: Expression::Integer(0) }),
                         },
-
                         Item::Loop {
                             body: {
                                 let mut items = vec![
                                     Item::If {
-                                        condition: TyExpr {
+                                        condition: TypedExpression {
                                             ty: &TyS::Bool,
-                                            expr: Expr::Infix(
-                                                Operator::Equal,
-                                                Box::new(TyExpr { ty: &TyS::I32, expr: Expr::Identifier(index.clone()) }),
-                                                Box::new(TyExpr { ty: &TyS::I32, expr: Expr::Var(end) }),
+                                            expr: Expression::Infix(
+                                                ast::Operator::Equal,
+                                                Box::new(TypedExpression { ty: &TyS::I32, expr: Expression::Identifier(index.clone()) }),
+                                                Box::new(TypedExpression { ty: &TyS::I32, expr: Expression::Var(end) }),
                                             ),
                                         },
                                         arm_true: vec![Item::Break],
@@ -423,14 +434,14 @@ fn visit_item<'tcx>(
                                 ];
                                 items.extend_from_slice(body);
                                 items.push(Item::Assignment {
-                                    lhs: TyExpr { ty: &TyS::I32, expr: Expr::Identifier(index.clone()) },
+                                    lhs: TypedExpression { ty: &TyS::I32, expr: Expression::Identifier(index.clone()) },
                                     operator: None,
-                                    expr: TyExpr {
+                                    expr: TypedExpression {
                                         ty: &TyS::I32,
-                                        expr: Expr::Infix(
-                                            Operator::Add,
-                                            Box::new(TyExpr { ty: &TyS::I32, expr: Expr::Identifier(index) }),
-                                            Box::new(TyExpr { ty: &TyS::I32, expr: Expr::Integer(1) }),
+                                        expr: Expression::Infix(
+                                            ast::Operator::Add,
+                                            Box::new(TypedExpression { ty: &TyS::I32, expr: Expression::Identifier(index) }),
+                                            Box::new(TypedExpression { ty: &TyS::I32, expr: Expression::Integer(1) }),
                                         ),
                                     },
                                 });
@@ -439,9 +450,11 @@ fn visit_item<'tcx>(
                         },
                     ];
 
-                    visit_item(&Item::Block(items), builder, local_names, ret, None, block);
+                    visit_item(&Item::Block(items), arena, builder, local_names, ret, None, block);
                 }
-                other => unimplemented!("{:?}", other),
+                other => {
+                    log::error!("Unsupported {:?}", other);
+                }
             };
         }
         Item::Break => {
@@ -460,7 +473,7 @@ fn visit_item<'tcx>(
                     Item::Yield(_) => {}
                     Item::Return(_) => {}
                     other => {
-                        visit_item(other, builder, local_names, ret, Some(after), &mut current);
+                        visit_item(other, arena, builder, local_names, ret, Some(after), &mut current);
                         builder.set_terminator_of(current, Terminator::Jump(entry));
                     }
                 }
@@ -471,15 +484,15 @@ fn visit_item<'tcx>(
         Item::Block(body) => {
             // FIXME: build a new block?
             for item in body {
-                visit_item(item, builder, local_names, ret, after_loop, block);
+                visit_item(item, arena, builder, local_names, ret, after_loop, block);
             }
-
         }
+        Item::Function { .. } => {}
         other => unimplemented!("{:?}", other),
     }
 }
 
-pub(crate) fn build_mir<'tcx>(item: &Item<'tcx>) -> Result<Mir<'tcx>, ()> {
+pub(crate) fn build_mir<'tcx>(item: &Item<'tcx>, arena: &'tcx Arena<TyS<'tcx>>) -> Result<Mir<'tcx>, ()> {
     let mut builder = MirBuilder::new();
     match item {
         Item::Function { name, is_extern, args, ty, body } if !is_extern => {
@@ -492,7 +505,7 @@ pub(crate) fn build_mir<'tcx>(item: &Item<'tcx>) -> Result<Mir<'tcx>, ()> {
 
             let mut x = builder.block();
             for item in body {
-                visit_item(item, &mut builder, &mut names, Some(ret), None, &mut x);
+                visit_item(item, arena, &mut builder, &mut names, Some(ret), None, &mut x);
             }
 
             return Ok(builder.build(name.to_owned()));
@@ -541,24 +554,35 @@ pub(crate) fn execute_mir(mir: &Mir<'_>, args: &[Const]) -> Const {
                     }
                     Instr::UnaryOperation(dst, op, a) => {
                         let val = match (op, vars[a]) {
-                            (Operator::Negate, Const::U32(v)) => Const::U32(v),
+                            (ast::Operator::Negate, Const::U32(v)) => Const::U32(v),
+                            (ast::Operator::Ref, _) => {
+                                log::error!("unsupported ref op");
+                                Const::Undefined
+                            }
                             _ => unimplemented!(),
                         };
                         vars.insert(*dst, val);
                     }
                     Instr::BinaryOperation(dst, op, a, b) => {
-                        let val = match (op, vars[a], vars[b]) {
-                            (Operator::Add, Const::U32(a), Const::U32(b)) => Const::U32(a + b),
-                            (Operator::Mul, Const::U32(a), Const::U32(b)) => Const::U32(a * b),
-                            (Operator::Sub, Const::U32(a), Const::U32(b)) => Const::U32(a.saturating_sub(b)),
-                            (Operator::Div, Const::U32(a), Const::U32(b)) => Const::U32(a / b),
-                            (Operator::Less, Const::U32(a), Const::U32(b)) => Const::Bool(a < b),
-                            (Operator::Greater, Const::U32(a), Const::U32(b)) => Const::Bool(a > b),
-                            (Operator::Equal, Const::U32(a), Const::U32(b)) => Const::Bool(a == b),
-                            (Operator::NotEqual, Const::U32(a), Const::U32(b)) => Const::Bool(a != b),
-                            (Operator::LessEqual, Const::U32(a), Const::U32(b)) => Const::Bool(a <= b),
-                            (Operator::GreaterEqual, Const::U32(a), Const::U32(b)) => Const::Bool(a >= b),
-                            (op, a, b) => unimplemented!("{a:?} {op:?} {b:?}"),
+                        let a = vars.get(a).copied().unwrap_or(Const::Undefined);
+                        let b = vars.get(b).copied().unwrap_or(Const::Undefined);
+                        let val = match (op, a, b) {
+                            (ast::Operator::Add, Const::U32(a), Const::U32(b)) => Const::U32(a + b),
+                            (ast::Operator::Mul, Const::U32(a), Const::U32(b)) => Const::U32(a * b),
+                            (ast::Operator::Sub, Const::U32(a), Const::U32(b)) => Const::U32(a.saturating_sub(b)),
+                            (ast::Operator::Div, Const::U32(a), Const::U32(b)) => Const::U32(a / b),
+                            (ast::Operator::Less, Const::U32(a), Const::U32(b)) => Const::Bool(a < b),
+                            (ast::Operator::Greater, Const::U32(a), Const::U32(b)) => Const::Bool(a > b),
+                            (ast::Operator::Equal, Const::U32(a), Const::U32(b)) => Const::Bool(a == b),
+                            (ast::Operator::NotEqual, Const::U32(a), Const::U32(b)) => Const::Bool(a != b),
+                            (ast::Operator::LessEqual, Const::U32(a), Const::U32(b)) => Const::Bool(a <= b),
+                            (ast::Operator::GreaterEqual, Const::U32(a), Const::U32(b)) => Const::Bool(a >= b),
+                            (op, Const::Undefined, _) => Const::Undefined,
+                            (op, _, Const::Undefined) => Const::Undefined,
+                            (op, a, b) => {
+                                log::warn!("{a:?} {op:?} {b:?}");
+                                Const::Undefined
+                            }
                         };
                         vars.insert(*dst, val);
                     }
@@ -591,16 +615,23 @@ pub(crate) fn execute_mir(mir: &Mir<'_>, args: &[Const]) -> Const {
                             curr_block = if v { if_true.0 } else { if_else.0 };
                             curr_inst = 0;
                         }
+                        Const::Undefined => {
+                            log::error!("trying to jump to undefined");
+                            return Const::Undefined;
+                        }
                         other => unimplemented!("{:?}", other),
                     }
                 }
                 Terminator::Return => {
-                    return vars[&Var(mir.num_args)];
+                    return match vars.get(&Var(mir.num_args)) {
+                        Some(x) => *x,
+                        None => Const::Undefined
+                    };
                 }
                 Terminator::Unreachable => {
                     log::warn!("executing unreachable");
                     return Const::Undefined;
-                },
+                }
             }
         }
     }

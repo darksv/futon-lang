@@ -1,4 +1,4 @@
-use crate::ast::{Expr, Item, Operator, TyExpr};
+use crate::ast::{Expression, Item, Operator};
 use crate::ty::{Ty, TyS};
 use std::borrow::{Borrow, Cow};
 use std::collections::{HashMap, HashSet};
@@ -108,7 +108,7 @@ fn genc_item<'a, 'tcx: 'a>(
     emitted_tys: &mut HashSet<Ty<'tcx>>,
 ) {
     match item {
-        Item::Let { name, ty, expr, .. } => {
+        Item::Let { name, r#type: ty, expr, .. } => {
             ensure_ty_emitted(
                 fmt,
                 emitted_tys,
@@ -155,15 +155,15 @@ fn genc_item<'a, 'tcx: 'a>(
                 fmt.write("void");
             } else {
                 for (i, arg) in args.iter().enumerate() {
-                    fmt.write(&format!("{} {}", format_ty(arg.ty), arg.name));
+                    fmt.write(&format!("{} {}", format_ty(arg.r#type), arg.name));
                     if i != args.len() - 1 {
                         fmt.write(", ");
                     }
                 }
 
                 for arg in args {
-                    vars.def(arg.name.clone(), arg.ty, None);
-                    ensure_ty_emitted(fmt, emitted_tys, arg.ty);
+                    vars.def(arg.name.clone(), arg.r#type, None);
+                    ensure_ty_emitted(fmt, emitted_tys, arg.r#type);
                 }
             }
 
@@ -204,7 +204,7 @@ fn genc_item<'a, 'tcx: 'a>(
             expr,
             body,
         } => match &expr.expr {
-            Expr::Identifier(name) => {
+            Expression::Identifier(name) => {
                 let (ty, _expr) = vars.get(name.clone()).expect(&name);
                 let (n, ty) = match *ty {
                     TyS::Array(n, ty) => (Some(n), ty),
@@ -241,7 +241,7 @@ fn genc_item<'a, 'tcx: 'a>(
                 fmt.unshift();
                 fmt.writeln("}");
             }
-            Expr::Range(to, None) => {
+            Expression::Range(to, None) => {
                 fmt.writeln(&format!(
                     "for (int64_t i = 0; i < {}; ++i) {{",
                     format_expr(to)
@@ -368,19 +368,19 @@ fn format_operator(op: &Operator) -> Cow<'static, str> {
 
 fn format_expr<'expr, 'tcx>(expr: &'expr TyExpr<'tcx>) -> Cow<'expr, str> {
     match &expr.expr {
-        Expr::Identifier(x) => Cow::Borrowed(x.as_str()),
-        Expr::Integer(value) => Cow::Owned(value.to_string()),
-        Expr::Float(value) => Cow::Owned(value.to_string()),
-        Expr::Prefix(op, expr) => {
+        Expression::Identifier(x) => Cow::Borrowed(x.as_str()),
+        Expression::Integer(value) => Cow::Owned(value.to_string()),
+        Expression::Float(value) => Cow::Owned(value.to_string()),
+        Expression::Prefix(op, expr) => {
             Cow::Owned(format!("{}{}", format_operator(op), format_expr(expr)))
         }
-        Expr::Infix(op, lhs, rhs) => Cow::Owned(format!(
+        Expression::Infix(op, lhs, rhs) => Cow::Owned(format!(
             "({} {} {})",
             format_expr(lhs),
             format_operator(op),
             format_expr(rhs)
         )),
-        Expr::Array(values) => {
+        Expression::Array(values) => {
             let mut s = String::new();
             s.push('{');
             for (i, value) in values.iter().enumerate() {
@@ -392,7 +392,7 @@ fn format_expr<'expr, 'tcx>(expr: &'expr TyExpr<'tcx>) -> Cow<'expr, str> {
             s.push('}');
             Cow::Owned(s)
         }
-        Expr::Call(expr, args) => {
+        Expression::Call(expr, args) => {
             let mut s = String::new();
             s.push('(');
             s.push_str(&format_expr(expr));
@@ -407,21 +407,21 @@ fn format_expr<'expr, 'tcx>(expr: &'expr TyExpr<'tcx>) -> Cow<'expr, str> {
             s.push(')');
             Cow::Owned(s)
         }
-        Expr::Tuple(_) => Cow::Borrowed("/* generated */"),
-        Expr::Bool(value) => Cow::Borrowed(if *value { "true" } else { "false" }),
-        Expr::Place(_, _) => format_place(expr),
-        Expr::Range(_, _) => Cow::Borrowed("/* range */"),
-        Expr::Index(arr, index_exp) => {
+        Expression::Tuple(_) => Cow::Borrowed("/* generated */"),
+        Expression::Bool(value) => Cow::Borrowed(if *value { "true" } else { "false" }),
+        Expression::Place(_, _) => format_place(expr),
+        Expression::Range(_, _) => Cow::Borrowed("/* range */"),
+        Expression::Index(arr, index_exp) => {
             todo!()
         }
-        Expr::Var(_) => unimplemented!()
+        Expression::Var(_) => unimplemented!()
     }
 }
 
 fn format_place<'expr, 'tcx>(place: &'expr TyExpr<'tcx>) -> Cow<'expr, str> {
     match &place.expr {
-        Expr::Identifier(name) => Cow::Borrowed(name),
-        Expr::Place(base, path) => {
+        Expression::Identifier(name) => Cow::Borrowed(name),
+        Expression::Place(base, path) => {
             Cow::Owned(format!("{}.{}", format_place(base), format_place(path)))
         }
         _ => unimplemented!(),

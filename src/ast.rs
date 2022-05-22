@@ -1,16 +1,28 @@
+use crate::lexer::SourceSpan;
 use crate::ty::Ty;
 use crate::mir::Var;
 
-#[derive(Debug, Clone)]
-pub(crate) struct Argument<'tcx> {
-    pub name: String,
-    pub ty: Ty<'tcx>,
+#[derive(Debug)]
+pub(crate) enum Type {
+    Name(String),
+    Tuple(Vec<Type>),
+    Pointer(Box<Type>),
+    Array(usize, Box<Type>),
+    Slice(Box<Type>),
+    Unit,
+    Function(Vec<Type>, Box<Type>),
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct Field<'tcx> {
+#[derive(Debug)]
+pub(crate) struct Argument {
     pub name: String,
-    pub ty: Ty<'tcx>,
+    pub r#type: Type,
+}
+
+#[derive(Debug)]
+pub(crate) struct Field {
+    pub name: String,
+    pub r#type: Type,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -31,69 +43,63 @@ pub(crate) enum Operator {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum Expr<'tcx> {
+pub(crate) enum Expression {
     Identifier(String),
     Integer(i64),
     Float(f64),
     Bool(bool),
-    Prefix(Operator, Box<TyExpr<'tcx>>),
-    Infix(Operator, Box<TyExpr<'tcx>>, Box<TyExpr<'tcx>>),
-    Place(Box<TyExpr<'tcx>>, Box<TyExpr<'tcx>>),
-    Array(Vec<TyExpr<'tcx>>),
-    Tuple(Vec<TyExpr<'tcx>>),
-    Call(Box<TyExpr<'tcx>>, Vec<TyExpr<'tcx>>),
-    Range(Box<TyExpr<'tcx>>, Option<Box<TyExpr<'tcx>>>),
-    Index(Box<TyExpr<'tcx>>, Box<TyExpr<'tcx>>),
+    Prefix(Operator, Box<Expression>),
+    Infix(Operator, Box<Expression>, Box<Expression>),
+    Place(Box<Expression>, Box<Expression>),
+    Array(Vec<Expression>),
+    Tuple(Vec<Expression>),
+    Call(Box<Expression>, Vec<Expression>),
+    Range(Box<Expression>, Option<Box<Expression>>),
+    Index(Box<Expression>, Box<Expression>),
     Var(Var),
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct TyExpr<'tcx> {
-    pub(crate) ty: Ty<'tcx>,
-    pub(crate) expr: Expr<'tcx>,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) enum Item<'tcx> {
+#[derive(Debug)]
+pub(crate) enum Item {
     Let {
         name: String,
-        ty: Option<Ty<'tcx>>,
-        expr: Option<TyExpr<'tcx>>,
+        r#type: Option<Type>,
+        expr: Option<Expression>,
     },
     Assignment {
-        lhs: TyExpr<'tcx>,
+        lhs: Expression,
         operator: Option<Operator>,
-        expr: TyExpr<'tcx>,
+        expr: Expression,
     },
     Expr {
-        expr: TyExpr<'tcx>,
+        expr: Expression,
     },
     Function {
         name: String,
         is_extern: bool,
-        args: Vec<Argument<'tcx>>,
-        ty: Ty<'tcx>,
-        body: Vec<Item<'tcx>>,
+        params: Vec<Argument>,
+        ty: Type,
+        body: Vec<Item>,
     },
     Struct {
         name: String,
-        fields: Vec<Field<'tcx>>,
+        fields: Vec<Field>,
     },
     If {
-        condition: TyExpr<'tcx>,
-        arm_true: Vec<Item<'tcx>>,
-        arm_false: Option<Vec<Item<'tcx>>>,
+        condition: Expression,
+        arm_true: Vec<Item>,
+        arm_false: Option<Vec<Item>>,
     },
     ForIn {
         name: String,
-        expr: TyExpr<'tcx>,
-        body: Vec<Item<'tcx>>,
+        expr: Expression,
+        body: Vec<Item>,
     },
     Loop {
-        body: Vec<Item<'tcx>>,
+        body: Vec<Item>,
     },
     Break,
-    Yield(Box<TyExpr<'tcx>>),
-    Return(Box<TyExpr<'tcx>>),
-    Block(Vec<Item<'tcx>>),
+    Yield(Box<Expression>),
+    Return(Box<Expression>),
+    Block(Vec<Item>),
 }
