@@ -1,0 +1,12 @@
+fn triangleExists(a: i32, b: i32, c: i32) -> bool {
+    if a + b > c {
+        if a + c > b {
+            if b + c > a {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+assert triangleExists(3, 4, 5) == true;

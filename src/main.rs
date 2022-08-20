@@ -32,21 +32,28 @@ fn main() {
     if let Some(file) = env::args_os().nth(1) {
         run_test(file);
     } else {
+        let mut total = 0;
+        let mut successful = 0;
         for entry in std::fs::read_dir("tests").unwrap() {
-            run_test(entry.unwrap().path());
+            if run_test(entry.unwrap().path()) {
+                successful += 1;
+            }
+            total += 1;
         }
+
+        println!("{}/{}", successful, total);
     }
 }
 
-fn run_test(path: impl AsRef<Path>) {
+fn run_test(path: impl AsRef<Path>) -> bool {
     let path = path.as_ref();
     print!("Testing {} --- ", path.display());
     std::panic::catch_unwind(|| {
-        compile_file(path);
-    });
+        compile_file(path)
+    }).unwrap_or(false)
 }
 
-fn compile_file(path: impl AsRef<Path>) {
+fn compile_file(path: impl AsRef<Path>) -> bool {
     let content = std::fs::read(path.as_ref()).unwrap();
     let content = String::from_utf8(content).unwrap();
 
@@ -64,7 +71,7 @@ fn compile_file(path: impl AsRef<Path>) {
                 match item {
                     Item::Function { name, .. } => {
                         let ir = build_ir(&item, &arena).unwrap();
-                        // dump_ir(&ir, &mut std::io::stdout()).unwrap();
+                        dump_ir(&ir, &mut std::io::stdout()).unwrap();
                         functions.insert(name.clone(), ir);
                     }
                     Item::Assert(expr) => {
@@ -102,8 +109,10 @@ fn compile_file(path: impl AsRef<Path>) {
                 println!("no assertions");
             } else if success {
                 println!("OK");
+                return true;
             }
         }
         Err(e) => println!("{:?}", e),
     }
+    false
 }

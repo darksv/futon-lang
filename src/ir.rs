@@ -40,6 +40,7 @@ impl Expression<'_> {
                 Const::I32(val) => Some(Const::I32(-val)),
                 _ => None
             },
+            Expression::Bool(x) => Some(Const::Bool(*x)),
             _ => None,
         }
     }
@@ -348,27 +349,30 @@ fn visit_item<'tcx>(
         Item::If { condition, arm_true, arm_false } => {
             let cond_var = visit_expr(condition, builder, &local_names, block);
 
-            let mut block_true = builder.block();
+            let first_block_true = builder.block();
             let succ_block = builder.block();
 
-            builder.set_terminator_of(block_true, Terminator::Jump(succ_block));
+            let mut block_true = first_block_true;
+            builder.set_terminator_of(first_block_true, Terminator::Jump(succ_block));
             for item in arm_true {
                 block_true = visit_item(item, arena, builder, local_names, ret, after_loop, block_true);
             }
 
             let block_false = if let Some(items) = arm_false {
-                let mut block_false = builder.block();
-                let succ = block_false;
+                let first_block_false = builder.block();
+
+                let mut block_false = first_block_false;
                 builder.set_terminator_of(block_false, Terminator::Jump(succ_block));
                 for item in items {
                     block_false = visit_item(item, arena, builder, local_names, ret, after_loop, block_false);
                 }
-                succ
+
+                first_block_false
             } else {
                 succ_block
             };
 
-            builder.set_terminator_of(block, Terminator::JumpIf(cond_var, block_true, block_false));
+            builder.set_terminator_of(block, Terminator::JumpIf(cond_var, first_block_true, block_false));
             succ_block
         }
         Item::Return(expr) => {
@@ -610,7 +614,7 @@ pub(crate) fn execute_ir(ir: &FunctionIr<'_>, args: &[Const]) -> Const {
                             }
                             _ => {
                                 unimplemented!("{:?} {:?}", op, a);
-                            },
+                            }
                         };
                         vars.insert(*dst, val);
                     }
@@ -654,11 +658,11 @@ pub(crate) fn execute_ir(ir: &FunctionIr<'_>, args: &[Const]) -> Const {
                             (op, Const::Undefined, _) => {
                                 log::warn!("Propagating undefined value for {a:?} {op:?} {b:?} from {a:?}");
                                 Const::Undefined
-                            },
+                            }
                             (op, _, Const::Undefined) => {
                                 log::warn!("Propagating undefined value for {a:?} {op:?} {b:?} from {b:?}");
                                 Const::Undefined
-                            },
+                            }
                             (op, a, b) => {
                                 log::warn!("Missing operation for {a:?} {op:?} {b:?}");
                                 Const::Undefined
