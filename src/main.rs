@@ -74,10 +74,7 @@ fn compile_file(path: impl AsRef<Path>) {
                 }
             }
 
-            if asserts.is_empty() {
-                println!("no assertions");
-            }
-
+            let mut success = true;
             for assert in &asserts {
                 let Expression::Infix(Operator::Equal, lhs, rhs) = &assert.expr else {
                     panic!("not a comparison");
@@ -97,9 +94,14 @@ fn compile_file(path: impl AsRef<Path>) {
 
                 if expected != actual {
                     println!("Assertion failed! {:?} {:?}", expected, actual);
-                } else {
-                    println!("OK");
+                    success = false;
                 }
+            }
+
+            if asserts.is_empty() {
+                println!("no assertions");
+            } else if success {
+                println!("OK");
             }
         }
         Err(e) => println!("{:?}", e),

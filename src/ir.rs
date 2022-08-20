@@ -310,20 +310,22 @@ fn visit_item<'tcx>(
     local_names: &mut HashMap<String, Var>,
     ret: Option<Var>,
     after_loop: Option<Block>,
-    block: &mut Block,
-) {
+    block: Block,
+) -> Block {
     match item {
         Item::Let { name, ty, expr } => {
             let var = builder.make_var(ty, Some(name.as_str()));
             local_names.insert(name.clone(), var);
 
             if let Some(expr) = expr {
-                let expr = visit_expr(expr, builder, &local_names, *block);
-                builder.push(*block, Instr::Copy(var, expr));
+                let expr = visit_expr(expr, builder, &local_names, block);
+                builder.push(block, Instr::Copy(var, expr));
             }
+
+            block
         }
         Item::Assignment { lhs, operator, expr } => {
-            let rhs = visit_expr(expr, builder, &local_names, *block);
+            let rhs = visit_expr(expr, builder, &local_names, block);
             let lhs = match &lhs.expr {
                 Expression::Identifier(ident) => local_names[ident],
                 Expression::Prefix(ast::Operator::Deref, expr) => {
@@ -332,23 +334,26 @@ fn visit_item<'tcx>(
                 _ => unimplemented!(),
             };
             if let Some(op) = operator {
-                builder.push(*block, Instr::BinaryOperation(lhs, *op, lhs, rhs));
+                builder.push(block, Instr::BinaryOperation(lhs, *op, lhs, rhs));
             } else {
-                builder.push(*block, Instr::Copy(lhs, rhs));
+                builder.push(block, Instr::Copy(lhs, rhs));
             }
+
+            block
         }
         Item::Expression { expr } => {
-            visit_expr(expr, builder, &local_names, *block);
+            visit_expr(expr, builder, &local_names, block);
+            block
         }
         Item::If { condition, arm_true, arm_false } => {
-            let cond_var = visit_expr(condition, builder, &local_names, *block);
+            let cond_var = visit_expr(condition, builder, &local_names, block);
 
             let mut block_true = builder.block();
             let succ_block = builder.block();
 
             builder.set_terminator_of(block_true, Terminator::Jump(succ_block));
             for item in arm_true {
-                visit_item(item, arena, builder, local_names, ret, after_loop, &mut block_true);
+                block_true = visit_item(item, arena, builder, local_names, ret, after_loop, block_true);
             }
 
             let block_false = if let Some(items) = arm_false {
@@ -356,20 +361,21 @@ fn visit_item<'tcx>(
                 let succ = block_false;
                 builder.set_terminator_of(block_false, Terminator::Jump(succ_block));
                 for item in items {
-                    visit_item(item, arena, builder, local_names, ret, after_loop, &mut block_false);
+                    block_false = visit_item(item, arena, builder, local_names, ret, after_loop, block_false);
                 }
                 succ
             } else {
                 succ_block
             };
 
-            builder.set_terminator_of(*block, Terminator::JumpIf(cond_var, block_true, block_false));
-            *block = succ_block;
+            builder.set_terminator_of(block, Terminator::JumpIf(cond_var, block_true, block_false));
+            succ_block
         }
         Item::Return(expr) => {
-            let var = visit_expr(expr, builder, &local_names, *block);
-            builder.push(*block, Instr::Copy(ret.unwrap(), var));
-            builder.set_terminator_of(*block, Terminator::Return);
+            let var = visit_expr(expr, builder, &local_names, block);
+            builder.push(block, Instr::Copy(ret.unwrap(), var));
+            builder.set_terminator_of(block, Terminator::Return);
+            block
         }
         Item::ForIn { name, expr, body } => {
             match expr.ty {
@@ -434,7 +440,7 @@ fn visit_item<'tcx>(
                         },
                     ];
 
-                    visit_item(&Item::Block(items), arena, builder, local_names, ret, None, block);
+                    visit_item(&Item::Block(items), arena, builder, local_names, ret, None, block)
                 }
                 &Type::Range => {
                     let Expression::Range(start_expr, end_expr) = &expr.expr else {
@@ -442,8 +448,8 @@ fn visit_item<'tcx>(
                     };
                     let end_expr = end_expr.as_ref().unwrap();
 
-                    let start = visit_expr(start_expr, builder, local_names, *block);
-                    let end = visit_expr(end_expr, builder, local_names, *block);
+                    let start = visit_expr(start_expr, builder, local_names, block);
+                    let end = visit_expr(end_expr, builder, local_names, block);
 
                     let index = name.clone();
 
@@ -487,15 +493,17 @@ fn visit_item<'tcx>(
                         },
                     ];
 
-                    visit_item(&Item::Block(items), arena, builder, local_names, ret, None, block);
+                    visit_item(&Item::Block(items), arena, builder, local_names, ret, None, block)
                 }
                 other => {
                     log::error!("Unsupported {:?}", other);
+                    block
                 }
-            };
+            }
         }
         Item::Break => {
-            builder.set_terminator_of(*block, Terminator::Jump(after_loop.unwrap()));
+            builder.set_terminator_of(block, Terminator::Jump(after_loop.unwrap()));
+            block
         }
         Item::Loop { body } => {
             let entry = builder.block();
@@ -503,28 +511,32 @@ fn visit_item<'tcx>(
 
             let after = builder.block();
 
-            builder.set_terminator_of(*block, Terminator::Jump(entry));
+            builder.set_terminator_of(block, Terminator::Jump(entry));
             for item in body {
                 match item {
                     Item::Break => {}
                     Item::Yield(_) => {}
                     Item::Return(_) => {}
                     other => {
-                        visit_item(other, arena, builder, local_names, ret, Some(after), &mut current);
+                        current = visit_item(other, arena, builder, local_names, ret, Some(after), current);
                         builder.set_terminator_of(current, Terminator::Jump(entry));
                     }
                 }
             }
             builder.set_terminator_of(after, Terminator::Return);
-            *block = after;
+            after
         }
         Item::Block(body) => {
             // FIXME: build a new block?
+            let mut block = block;
             for item in body {
-                visit_item(item, arena, builder, local_names, ret, after_loop, block);
+                block = visit_item(item, arena, builder, local_names, ret, after_loop, block);
             }
+            block
         }
-        Item::Function { .. } => {}
+        Item::Function { .. } => {
+            block
+        }
         other => unimplemented!("{:?}", other),
     }
 }
@@ -540,9 +552,9 @@ pub(crate) fn build_ir<'tcx>(item: &Item<'tcx>, arena: &'tcx Arena<Type<'tcx>>) 
             }
             let ret = builder.make_ret(ty);
 
-            let mut x = builder.block();
+            let mut block = builder.block();
             for item in body {
-                visit_item(item, arena, &mut builder, &mut names, Some(ret), None, &mut x);
+                block = visit_item(item, arena, &mut builder, &mut names, Some(ret), None, block);
             }
 
             return Ok(builder.build(name.to_owned()));
