@@ -155,7 +155,12 @@ fn deduce_expr_ty<'tcx>(
             let inner = deduce_expr_ty(expr, arena, &locals);
             let ty = match op {
                 ast::Operator::Ref => arena.alloc(Type::Pointer(inner.ty)),
-                ast::Operator::Deref => unimplemented!(),
+                ast::Operator::Deref => {
+                    match inner.ty {
+                        Type::Pointer(inner) => inner,
+                        _ => unimplemented!(),
+                    }
+                },
                 _ => inner.ty,
             };
             TypedExpression {

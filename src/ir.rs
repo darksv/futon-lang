@@ -22,9 +22,10 @@ impl fmt::Debug for Var {
 }
 
 #[derive(Debug)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 pub(crate) enum Const {
     U32(u32),
+    I32(i32),
     F32(f32),
     Bool(bool),
     Undefined,
@@ -33,8 +34,12 @@ pub(crate) enum Const {
 impl Expression<'_> {
     pub(crate) fn as_const(&self) -> Option<Const> {
         match self {
-            Expression::Integer(x) => Some(Const::U32(*x as _)),
+            Expression::Integer(x) => Some(Const::I32(*x as _)),
             Expression::Float(x) => Some(Const::F32(*x as _)),
+            Expression::Prefix(ast::Operator::Negate, inner) => match inner.expr.as_const()? {
+                Const::I32(val) => Some(Const::I32(-val)),
+                _ => None
+            },
             _ => None,
         }
     }
@@ -226,7 +231,7 @@ fn visit_expr<'tcx>(
         }
         Expression::Integer(val) => {
             let var = builder.make_var(expr.ty, None);
-            builder.push(block, Instr::Const(var, Const::U32(*val as u32)));
+            builder.push(block, Instr::Const(var, Const::I32(*val as i32)));
             var
         }
         Expression::Float(val) => {
@@ -321,6 +326,9 @@ fn visit_item<'tcx>(
             let rhs = visit_expr(expr, builder, &local_names, *block);
             let lhs = match &lhs.expr {
                 Expression::Identifier(ident) => local_names[ident],
+                Expression::Prefix(ast::Operator::Deref, expr) => {
+                    todo!("deref");
+                }
                 _ => unimplemented!(),
             };
             if let Some(op) = operator {
@@ -334,25 +342,29 @@ fn visit_item<'tcx>(
         }
         Item::If { condition, arm_true, arm_false } => {
             let cond_var = visit_expr(condition, builder, &local_names, *block);
+
             let mut block_true = builder.block();
+            let succ_block = builder.block();
+
+            builder.set_terminator_of(block_true, Terminator::Jump(succ_block));
             for item in arm_true {
                 visit_item(item, arena, builder, local_names, ret, after_loop, &mut block_true);
             }
 
-            let block_false = if let Some(arm_false) = arm_false {
+            let block_false = if let Some(items) = arm_false {
                 let mut block_false = builder.block();
-                for item in arm_false {
+                let succ = block_false;
+                builder.set_terminator_of(block_false, Terminator::Jump(succ_block));
+                for item in items {
                     visit_item(item, arena, builder, local_names, ret, after_loop, &mut block_false);
                 }
-                Some(block_false)
+                succ
             } else {
-                None
+                succ_block
             };
-            let next_block = builder.block();
 
-            let block_false = if let Some(b) = block_false { b } else { next_block };
             builder.set_terminator_of(*block, Terminator::JumpIf(cond_var, block_true, block_false));
-            *block = next_block;
+            *block = succ_block;
         }
         Item::Return(expr) => {
             let var = visit_expr(expr, builder, &local_names, *block);
@@ -579,12 +591,14 @@ pub(crate) fn execute_ir(ir: &FunctionIr<'_>, args: &[Const]) -> Const {
                     }
                     Instr::UnaryOperation(dst, op, a) => {
                         let val = match (op, vars[a]) {
-                            (ast::Operator::Negate, Const::U32(v)) => Const::U32(v),
+                            (ast::Operator::Negate, Const::I32(v)) => Const::I32(-v),
                             (ast::Operator::Ref, _) => {
                                 log::error!("unsupported ref op");
                                 Const::Undefined
                             }
-                            _ => unimplemented!(),
+                            _ => {
+                                unimplemented!("{:?} {:?}", op, a);
+                            },
                         };
                         vars.insert(*dst, val);
                     }
@@ -592,6 +606,17 @@ pub(crate) fn execute_ir(ir: &FunctionIr<'_>, args: &[Const]) -> Const {
                         let a = vars.get(a).copied().unwrap_or(Const::Undefined);
                         let b = vars.get(b).copied().unwrap_or(Const::Undefined);
                         let val = match (op, a, b) {
+                            (ast::Operator::Add, Const::I32(a), Const::I32(b)) => Const::I32(a + b),
+                            (ast::Operator::Mul, Const::I32(a), Const::I32(b)) => Const::I32(a * b),
+                            (ast::Operator::Sub, Const::I32(a), Const::I32(b)) => Const::I32(a.saturating_sub(b)),
+                            (ast::Operator::Div, Const::I32(a), Const::I32(b)) => Const::I32(a / b),
+                            (ast::Operator::Less, Const::I32(a), Const::I32(b)) => Const::Bool(a < b),
+                            (ast::Operator::Greater, Const::I32(a), Const::I32(b)) => Const::Bool(a > b),
+                            (ast::Operator::Equal, Const::I32(a), Const::I32(b)) => Const::Bool(a == b),
+                            (ast::Operator::NotEqual, Const::I32(a), Const::I32(b)) => Const::Bool(a != b),
+                            (ast::Operator::LessEqual, Const::I32(a), Const::I32(b)) => Const::Bool(a <= b),
+                            (ast::Operator::GreaterEqual, Const::I32(a), Const::I32(b)) => Const::Bool(a >= b),
+
                             (ast::Operator::Add, Const::U32(a), Const::U32(b)) => Const::U32(a + b),
                             (ast::Operator::Mul, Const::U32(a), Const::U32(b)) => Const::U32(a * b),
                             (ast::Operator::Sub, Const::U32(a), Const::U32(b)) => Const::U32(a.saturating_sub(b)),
@@ -614,10 +639,16 @@ pub(crate) fn execute_ir(ir: &FunctionIr<'_>, args: &[Const]) -> Const {
                             (ast::Operator::LessEqual, Const::F32(a), Const::F32(b)) => Const::Bool(a <= b),
                             (ast::Operator::GreaterEqual, Const::F32(a), Const::F32(b)) => Const::Bool(a >= b),
 
-                            (op, Const::Undefined, _) => Const::Undefined,
-                            (op, _, Const::Undefined) => Const::Undefined,
+                            (op, Const::Undefined, _) => {
+                                log::warn!("Propagating undefined value for {a:?} {op:?} {b:?} from {a:?}");
+                                Const::Undefined
+                            },
+                            (op, _, Const::Undefined) => {
+                                log::warn!("Propagating undefined value for {a:?} {op:?} {b:?} from {b:?}");
+                                Const::Undefined
+                            },
                             (op, a, b) => {
-                                log::warn!("{a:?} {op:?} {b:?}");
+                                log::warn!("Missing operation for {a:?} {op:?} {b:?}");
                                 Const::Undefined
                             }
                         };

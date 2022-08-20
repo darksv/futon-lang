@@ -2,6 +2,8 @@
 #![allow(clippy::match_like_matches_macro)]
 #![allow(unused)]
 
+extern crate core;
+
 use std::collections::HashMap;
 use std::env;
 use std::path::Path;
@@ -27,17 +29,21 @@ mod type_checking;
 fn main() {
     env_logger::init();
 
-    if let Some(file) = env::args().nth(1) {
-        compile_file(file);
+    if let Some(file) = env::args_os().nth(1) {
+        run_test(file);
     } else {
         for entry in std::fs::read_dir("tests").unwrap() {
-            let entry = entry.unwrap();
-            println!("testing {:?}", entry.path());
-            std::panic::catch_unwind(|| {
-                compile_file(entry.path());
-            });
+            run_test(entry.unwrap().path());
         }
     }
+}
+
+fn run_test(path: impl AsRef<Path>) {
+    let path = path.as_ref();
+    print!("Testing {} --- ", path.display());
+    std::panic::catch_unwind(|| {
+        compile_file(path);
+    });
 }
 
 fn compile_file(path: impl AsRef<Path>) {
@@ -58,7 +64,7 @@ fn compile_file(path: impl AsRef<Path>) {
                 match item {
                     Item::Function { name, .. } => {
                         let ir = build_ir(&item, &arena).unwrap();
-                        dump_ir(&ir, &mut std::io::stdout()).unwrap();
+                        // dump_ir(&ir, &mut std::io::stdout()).unwrap();
                         functions.insert(name.clone(), ir);
                     }
                     Item::Assert(expr) => {
@@ -66,6 +72,10 @@ fn compile_file(path: impl AsRef<Path>) {
                     }
                     _ => (),
                 }
+            }
+
+            if asserts.is_empty() {
+                println!("no assertions");
             }
 
             for assert in &asserts {
@@ -84,7 +94,12 @@ fn compile_file(path: impl AsRef<Path>) {
                 let expected = rhs.expr.as_const().unwrap();
                 let args: Vec<_> = args.iter().map(|it| it.expr.as_const().unwrap()).collect();
                 let actual = execute_ir(&functions[name], &args);
-                println!("{:?} {:?}", expected, actual);
+
+                if expected != actual {
+                    println!("Assertion failed! {:?} {:?}", expected, actual);
+                } else {
+                    println!("OK");
+                }
             }
         }
         Err(e) => println!("{:?}", e),

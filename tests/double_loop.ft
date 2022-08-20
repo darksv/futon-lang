@@ -1,7 +1,6 @@
 fn foo(n: i32) -> i32 {
     let i = 0;
     let j = 0;
-    let k = 0;
     loop {
         if i == n {
             break;
@@ -18,3 +17,5 @@ fn foo(n: i32) -> i32 {
 
     return i * j;
 }
+
+assert foo(10) == 100;

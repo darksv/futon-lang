@@ -1,9 +1,15 @@
 fn foo(a: i32) -> i32 {
     if a > 10 {
         return 0;
-    } else if a < -10 {
-        return 1;
     } else {
-        return 2;
+        if a < -10 {
+            return 1;
+        } else {
+            return 2;
+        }
     }
 }
+
+assert foo(11) == 0;
+assert foo(-11) == 1;
+assert foo(3) == 2;
