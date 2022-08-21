@@ -1,4 +1,4 @@
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Default)]
 pub(crate) enum Type<'tcx> {
     Bool,
     U32,
@@ -14,9 +14,11 @@ pub(crate) enum Type<'tcx> {
     Function(Vec<TypeRef<'tcx>>, TypeRef<'tcx>),
     Pointer(TypeRef<'tcx>),
     Range,
+    #[default]
     Unknown,
     Error,
     Any,
+    Placeholder(usize),
 }
 
 pub(crate) type TypeRef<'tcx> = &'tcx Type<'tcx>;

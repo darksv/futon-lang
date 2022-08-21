@@ -160,7 +160,7 @@ fn deduce_expr_ty<'tcx>(
                         Type::Pointer(inner) => inner,
                         _ => unimplemented!(),
                     }
-                },
+                }
                 _ => inner.ty,
             };
             TypedExpression {
@@ -298,11 +298,11 @@ fn deduce_expr_ty<'tcx>(
         }
         ast::Expression::Var(_) => unreachable!(),
         ast::Expression::Cast(expr, ty) => {
-            let expr = deduce_expr_ty(expr, arena, locals , defined_types);
-            let target_ty = unify(arena, ty, defined_types);
+            let expr = deduce_expr_ty(expr, arena, locals, defined_types);
+            let target_ty = unify(ty, arena, defined_types);
             TypedExpression {
                 expr: Expression::Cast(Box::new(expr), target_ty),
-                ty: target_ty
+                ty: target_ty,
             }
         }
     }
@@ -328,7 +328,7 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
                 log::debug!("deduced type {:?} for binding {}", expr.ty, name);
                 let ty = match ty {
                     Some(ty) => {
-                        let ty = unify(arena, ty, defined_types);
+                        let ty = unify(ty, arena, defined_types);
                         if !is_compatible_to(ty, expr.ty) {
                             log::debug!("mismatched types. expected {:?}, got {:?}", ty, expr.ty);
                             continue;
@@ -369,32 +369,34 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
             } => {
                 let mut args = Vec::new();
                 for param in params {
-                    let ty = unify(arena, &param.r#type, defined_types);
+                    let ty = unify(&param.r#type, arena, defined_types);
                     log::debug!("Found arg {} of type {:?}", &param.name, ty);
-                    locals.insert(param.name.as_str(), unify(arena, &param.r#type, defined_types));
+                    locals.insert(param.name.as_str(), unify(&param.r#type, arena, defined_types));
                     args.push(ty);
                 }
 
-                let func_ty = Type::Function(args, unify(arena, ty, defined_types));
+                let func_ty = Type::Function(args, unify(ty, arena, defined_types));
                 let func_ty = arena.alloc(func_ty);
                 locals.insert(name.as_str(), func_ty);
 
-                let body = infer_types(body, arena, locals, Some(unify(arena, ty, defined_types)), defined_types);
+                let body = infer_types(body, arena, locals, Some(unify(ty, arena, defined_types)), defined_types);
                 Item::Function {
                     name: name.clone(),
                     is_extern: false,
-                    args: params.iter().map(|it| Argument { name: it.name.clone(), ty: unify(arena, &it.r#type, defined_types) }).collect(),
-                    ty: unify(arena, ty, defined_types),
+                    args: params.iter().map(|it| Argument {
+                        name: it.name.clone(),
+                        ty: unify(&it.r#type, arena, defined_types),
+                    }).collect(),
+                    ty: unify(ty, arena, defined_types),
                     body,
                 }
             }
             ast::Item::Struct { name, fields } => {
-                defined_types.insert(name, {
-                    let fields: Vec<_> = fields.iter().map(|f| {
-                        (f.name.clone(), unify(arena, &f.r#type, defined_types))
-                    }).collect();
-                    arena.alloc(Type::Struct { fields })
-                });
+                defined_types.insert(name, arena.alloc(Type::Unknown));
+                let fields: Vec<_> = fields.iter().map(|field| {
+                    (field.name.clone(), unify(&field.r#type, arena, defined_types))
+                }).collect();
+                arena.alloc(Type::Struct { fields });
                 continue;
             }
             ast::Item::If {
@@ -475,7 +477,11 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
     lowered_items
 }
 
-fn unify<'tcx>(arena: &'tcx Arena<Type<'tcx>>, ty: &ast::Type, defined_types: &HashMap<&str, TypeRef<'tcx>>) -> TypeRef<'tcx> {
+fn unify<'tcx>(
+    ty: &ast::Type,
+    arena: &'tcx Arena<Type<'tcx>>,
+    defined_types: &HashMap<&str, TypeRef<'tcx>>,
+) -> TypeRef<'tcx> {
     match ty {
         ast::Type::Name(name) => {
             match name.as_str() {
@@ -488,17 +494,17 @@ fn unify<'tcx>(arena: &'tcx Arena<Type<'tcx>>, ty: &ast::Type, defined_types: &H
         }
         ast::Type::Tuple(types) => {
             let types: Vec<_> = types.iter()
-                .map(|it| unify(arena, it, defined_types))
+                .map(|it| unify(it, arena, defined_types))
                 .collect();
             arena.alloc(Type::Tuple(types))
         }
-        ast::Type::Pointer(ty) => arena.alloc(Type::Pointer(unify(arena, ty, defined_types))),
-        ast::Type::Array(len, ty) => arena.alloc(Type::Array(*len, unify(arena, ty, defined_types))),
-        ast::Type::Slice(item_ty) => arena.alloc(Type::Slice(unify(arena, item_ty, defined_types))),
+        ast::Type::Pointer(ty) => arena.alloc(Type::Pointer(unify(ty, arena, defined_types))),
+        ast::Type::Array(len, ty) => arena.alloc(Type::Array(*len, unify(ty, arena, defined_types))),
+        ast::Type::Slice(item_ty) => arena.alloc(Type::Slice(unify(item_ty, arena, defined_types))),
         ast::Type::Unit => arena.alloc(Type::Unit),
         ast::Type::Function(args_ty, ret_ty) => {
-            let args = args_ty.iter().map(|it| unify(arena, it, defined_types)).collect();
-            arena.alloc(Type::Function(args, unify(arena, ret_ty, defined_types)))
+            let args = args_ty.iter().map(|it| unify(it, arena, defined_types)).collect();
+            arena.alloc(Type::Function(args, unify(ret_ty, arena, defined_types)))
         }
     }
 }
