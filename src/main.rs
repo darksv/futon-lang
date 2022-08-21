@@ -97,7 +97,7 @@ fn compile_file(path: impl AsRef<Path>) -> bool {
 
                 let expected = rhs.expr.as_const().unwrap();
                 let args: Vec<_> = args.iter().map(|it| it.expr.as_const().unwrap()).collect();
-                let actual = execute_ir(&functions[name], &args);
+                let actual = execute_ir(&functions[name], &args, &functions);
 
                 if expected != actual {
                     println!("Assertion failed! {:?} {:?}", expected, actual);

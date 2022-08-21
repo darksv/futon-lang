@@ -5,4 +5,4 @@ fn fib(n: i32) -> i32 {
     return fib(n - 2) + fib(n - 1);
 }
 
-assert fib(4) == 100;
+assert fib(10) == 89;

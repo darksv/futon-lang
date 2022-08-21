@@ -58,7 +58,7 @@ enum Instr {
     BinaryOperation(Var, ast::Operator, Var, Var),
     SetElement(Var, usize, Var),
     GetElement(Var, Var, Var),
-    Debug(Vec<Var>),
+    Call(Var, String, Vec<Var>),
     Cast(Var, Var, CastType),
 }
 
@@ -95,8 +95,8 @@ impl fmt::Debug for Instr {
             Instr::Cast(left, right, mode) => {
                 write!(f, "{:?} = cast({:?}, {:?})", left, right, mode)
             }
-            Instr::Debug(args) => {
-                Ok(())
+            Instr::Call(target, ident, args) => {
+                write!(f, "{:?} = {}({:?})", target, ident, args)
             }
         }
     }
@@ -284,13 +284,19 @@ fn visit_expr<'tcx>(
             element_var
         }
         Expression::Call(func, args) => {
+            let ident = match &func.expr {
+                Expression::Identifier(ident) => {ident}
+                _ => todo!(),
+            };
+
             let mut params = Vec::new();
             for arg in args {
                 params.push(visit_expr(arg, builder, names, block));
             }
 
-            builder.push(block, Instr::Debug(params));
-            builder.make_var(expr.ty, Some("Return of"))
+            let ret = builder.make_var(expr.ty, Some("Return of"));
+            builder.push(block, Instr::Call(ret, ident.clone(), params));
+            ret
         }
         Expression::Tuple(_) | Expression::Range(_, _) => Var::error(),
         Expression::Var(var) => var.clone(),
@@ -569,7 +575,7 @@ pub(crate) fn build_ir<'tcx>(item: &Item<'tcx>, arena: &'tcx Arena<Type<'tcx>>) 
 }
 
 
-pub(crate) fn execute_ir(ir: &FunctionIr<'_>, args: &[Const]) -> Const {
+pub(crate) fn execute_ir(ir: &FunctionIr<'_>, args: &[Const], functions: &HashMap<String, FunctionIr<'_>>) -> Const {
     let mut curr_block = 0;
     let mut curr_inst = 0;
     let mut vars: HashMap<Var, Const> = HashMap::new();
@@ -688,10 +694,11 @@ pub(crate) fn execute_ir(ir: &FunctionIr<'_>, args: &[Const]) -> Const {
                             (CastType::Custom, _) => Const::Undefined,
                         });
                     }
-                    Instr::Debug(args) => {
-                        for (idx, arg) in args.iter().enumerate() {
-                            println!("#{} = {:?}", idx, vars[arg]);
-                        }
+                    Instr::Call(target, name, args) => {
+                        let func = &functions[name];
+                        let args: Vec<_> = args.iter().map(|it| vars[it]).collect();
+                        let result = execute_ir(func, &args, functions);
+                        vars.insert(*target, result);
                     }
                 }
                 curr_inst += 1;
