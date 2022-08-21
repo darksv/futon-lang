@@ -64,14 +64,15 @@ fn compile_file(path: impl AsRef<Path>) -> bool {
         Ok(ref mut k) => {
             let mut locals = HashMap::new();
 
-            let items = infer_types(k, &arena, &mut locals, None);
+            let mut types = HashMap::new();
+            let items = infer_types(k, &arena, &mut locals, None, &mut types);
             let mut functions = HashMap::new();
             let mut asserts = Vec::new();
             for item in &items {
                 match item {
                     Item::Function { name, .. } => {
                         let ir = build_ir(&item, &arena).unwrap();
-                        dump_ir(&ir, &mut std::io::stdout()).unwrap();
+                        // dump_ir(&ir, &mut std::io::stdout()).unwrap();
                         functions.insert(name.clone(), ir);
                     }
                     Item::Assert(expr) => {

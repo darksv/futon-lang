@@ -8,10 +8,12 @@ pub(crate) enum Type<'tcx> {
     Slice(TypeRef<'tcx>),
     Unit,
     Tuple(Vec<TypeRef<'tcx>>),
+    Struct {
+        fields: Vec<(String, TypeRef<'tcx>)>,
+    },
     Function(Vec<TypeRef<'tcx>>, TypeRef<'tcx>),
     Pointer(TypeRef<'tcx>),
     Range,
-    Other(String),
     Unknown,
     Error,
     Any,
