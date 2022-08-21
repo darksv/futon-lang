@@ -1,7 +1,9 @@
-fn main(n: u32) -> u32 {
+fn main(n: i32) -> i32 {
     let sum = 0;
     for item in [1, 2, 3, 4, 5, 6] {
         sum += item;
     }
     return sum;
 }
+
+assert main(12345) == 21;

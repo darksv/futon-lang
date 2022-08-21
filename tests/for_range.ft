@@ -6,3 +6,5 @@ fn mortile() -> i32 {
 
     return sum;
 }
+
+assert mortile() == 45;

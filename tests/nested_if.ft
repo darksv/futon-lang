@@ -10,3 +10,4 @@ fn triangleExists(a: i32, b: i32, c: i32) -> bool {
 }
 
 assert triangleExists(3, 4, 5) == true;
+assert triangleExists(3, 4, 10) == false;

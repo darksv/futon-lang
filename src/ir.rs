@@ -676,6 +676,7 @@ pub(crate) fn execute_ir(ir: &FunctionIr<'_>, args: &[Const]) -> Const {
                     Instr::GetElement(var, arr, index) => {
                         let index = match vars[index] {
                             Const::U32(v) => v as usize,
+                            Const::I32(v) => v as usize,
                             other => unimplemented!("{:?}", other),
                         };
                         vars.insert(*var, vars_arrays[&(*arr, index)]);

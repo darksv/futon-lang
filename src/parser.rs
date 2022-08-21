@@ -310,6 +310,7 @@ impl<'lex> Parser<'lex> {
             TokenType::Punct('*') => 2,
             TokenType::Punct('/') => 2,
             TokenType::Punct('.') => 3,
+            TokenType::Punct('(') => 4,
             _ => 0,
         }
     }
