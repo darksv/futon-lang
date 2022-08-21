@@ -10,5 +10,8 @@ fn abc(x: i32) -> bool {
         let b = 1;
         break;
     }
-    let x = 1000;
+    return false;
 }
+
+assert abc(-10) == true;
+assert abc(10) == false;

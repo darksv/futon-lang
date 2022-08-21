@@ -1,4 +1,4 @@
-fn main(n: u32) -> u32 {
+fn main(n: i32) -> i32 {
     let sum = 0;
     let items = [1, 2, 3, 4, 5];
     let index = 0;
@@ -12,3 +12,5 @@ fn main(n: u32) -> u32 {
 
     return sum;
 }
+
+assert main(123) == 15;

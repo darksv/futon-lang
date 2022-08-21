@@ -1,0 +1,5 @@
+fn foo(n: f32) -> f32 {
+    return n / 2.0 * 4.0;
+}
+
+assert foo(8.0) == 16.0;

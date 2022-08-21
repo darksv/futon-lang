@@ -1,9 +1,19 @@
-fn integrate(a: f32, b: f32) -> f32 {
-    let dt = 0.01;
-    let n = ((b - a) / dt) as u32;
-
-
-    return a + b;
+fn f(x: f32) -> f32 {
+    return -x * x + 2.0;
 }
 
-assert integrate(0.0, 1.0) == 1.0;
+fn integrate(a: f32, b: f32) -> f32 {
+    let dt = 0.01;
+    let n = ((b - a) / dt) as i32;
+    let sum = 0.0;
+
+    for i in range 0 to n {
+        let j = i as f32;
+        sum += dt * (f(a + j * dt) + f(a + (j + 1.0) * dt)) / 2.0;
+    }
+
+    return sum;
+}
+
+assert f(1.0) == 1.0;
+assert integrate(0.0, 1.0) == 1.6666499;

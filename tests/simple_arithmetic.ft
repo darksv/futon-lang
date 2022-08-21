@@ -1,13 +1,13 @@
-fn add(a: u32, b: u32) -> u32 {
-    let c: u32 = a * b;
-    let c2: u32 = a + b * c;
-    let d: u32 = -a - b;
+fn add(a: i32, b: i32) -> i32 {
+    let c: i32 = a * b;
+    let c2: i32 = a + b * c;
+    let d: i32 = -a - b;
     let e = -a - b - c2;
 
     return c - a / d - b * e;
 }
 
-fn min(a: u32, b: u32, c: u32) -> u32 {
+fn min(a: i32, b: i32, c: i32) -> i32 {
     if a < b {
         if a < c {
             return a;
@@ -22,3 +22,8 @@ fn min(a: u32, b: u32, c: u32) -> u32 {
         }
     }
 }
+
+assert min(1, 2, 3) == 1;
+assert min(4, 2, 3) == 2;
+assert min(4, 5, 3) == 3;
+assert add(37, 21) == 345429;

@@ -48,7 +48,8 @@ impl Expression<'_> {
 
 #[derive(Debug)]
 enum CastType {
-    Custom,
+    F32ToI32,
+    I32ToF32,
 }
 
 enum Instr {
@@ -285,7 +286,7 @@ fn visit_expr<'tcx>(
         }
         Expression::Call(func, args) => {
             let ident = match &func.expr {
-                Expression::Identifier(ident) => {ident}
+                Expression::Identifier(ident) => { ident }
                 _ => todo!(),
             };
 
@@ -304,7 +305,11 @@ fn visit_expr<'tcx>(
         Expression::Cast(expr, target_ty) => {
             let var = builder.make_var(expr.ty, None);
             let x = visit_expr(expr, builder, names, block);
-            builder.push(block, Instr::Cast(var, x, CastType::Custom));
+            builder.push(block, Instr::Cast(var, x, match (expr.ty, target_ty) {
+                (Type::F32, Type::I32) => CastType::F32ToI32,
+                (Type::I32, Type::F32) => CastType::I32ToF32,
+                (a, b) => todo!("{:?} {:?}", a, b),
+            }));
             var
         }
     }
@@ -614,6 +619,7 @@ pub(crate) fn execute_ir(ir: &FunctionIr<'_>, args: &[Const], functions: &HashMa
                     Instr::UnaryOperation(dst, op, a) => {
                         let val = match (op, vars[a]) {
                             (ast::Operator::Negate, Const::I32(v)) => Const::I32(-v),
+                            (ast::Operator::Negate, Const::F32(v)) => Const::F32(-v),
                             (ast::Operator::Ref, _) => {
                                 log::error!("unsupported ref op");
                                 Const::Undefined
@@ -691,7 +697,9 @@ pub(crate) fn execute_ir(ir: &FunctionIr<'_>, args: &[Const], functions: &HashMa
                         let source = vars.get(source).copied().unwrap_or(Const::Undefined);
                         vars.insert(*target, match (mode, source) {
                             (_, Const::Undefined) => Const::Undefined,
-                            (CastType::Custom, _) => Const::Undefined,
+                            (CastType::F32ToI32, Const::F32(val)) => Const::I32(val as i32),
+                            (CastType::I32ToF32, Const::I32(val)) => Const::F32(val as f32),
+                            _ => todo!(),
                         });
                     }
                     Instr::Call(target, name, args) => {
