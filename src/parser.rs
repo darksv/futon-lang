@@ -72,6 +72,7 @@ impl<'lex> Parser<'lex> {
                 TokenType::Keyword(Keyword::If) => self.parse_if(),
                 TokenType::Keyword(Keyword::Yield) => self.parse_yield(),
                 TokenType::Keyword(Keyword::Return) => self.parse_return(),
+                TokenType::Keyword(Keyword::Assert) => self.parse_assert(),
                 TokenType::Keyword(Keyword::Break) => {
                     self.advance();
                     self.expect_one(';')?;
@@ -273,6 +274,12 @@ impl<'lex> Parser<'lex> {
                     self.expect_one(')')?;
                     ast::Expression::Call(Box::new(expr), args)
                 }
+                TokenType::Punct('{') if let Some(('.' | '}', _)) = self.peek(1).get_punct() => {
+                    self.advance();
+                    let args = self.parse_comma_separated_field_exprs()?;
+                    self.expect_one('}')?;
+                    ast::Expression::StructLiteral(expr.as_str().map(String::from), args)
+                }
                 TokenType::Punct('[') => {
                     self.advance();
                     let index_expr = self.parse_expr(0)?;
@@ -296,6 +303,20 @@ impl<'lex> Parser<'lex> {
         let mut values = vec![];
         while let Some(value) = self.parse_expr_opt(0)? {
             values.push(value);
+            if !self.match_one(',') {
+                break;
+            }
+        }
+        Ok(values)
+    }
+
+    fn parse_comma_separated_field_exprs(&mut self) -> ParseResult<Vec<(String, ast::Expression)>> {
+        let mut values = vec![];
+        while self.match_punct(PunctKind::Single, '.') {
+            let field_name = self.expect_identifier()?;
+            self.expect_punct(PunctKind::Single, '=')?;
+            let value = self.parse_expr(0)?;
+            values.push((field_name.as_string(), value));
             if !self.match_one(',') {
                 break;
             }

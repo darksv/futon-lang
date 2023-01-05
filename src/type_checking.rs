@@ -40,6 +40,11 @@ fn is_compatible_to(ty: TypeRef<'_>, subty: TypeRef<'_>) -> bool {
         }
         (Type::Pointer(ty1), Type::Pointer(ty2)) => is_compatible_to(ty1, ty2),
         (Type::Any, _) | (_, Type::Any) => true,
+        (Type::Struct { fields: lhs_fields }, Type::Struct { fields: rhs_fields }) => {
+            std::iter::zip(lhs_fields, rhs_fields).all(|((lhs_name, lhs_ty), (rhs_name, rhs_ty))| {
+                lhs_name == rhs_name && is_compatible_to(lhs_ty, rhs_ty)
+            })
+        }
         _ => false,
     }
 }
@@ -49,6 +54,27 @@ pub(crate) struct TypedExpression<'tcx> {
     pub(crate) ty: TypeRef<'tcx>,
     pub(crate) expr: Expression<'tcx>,
 }
+
+macro_rules! intrinsics {
+    ($($name:ident),*) => {
+        #[derive(Copy, Clone, PartialEq, Debug)]
+        #[allow(non_camel_case_types)]
+        pub enum Intrinsic { $($name,)* }
+
+        impl Intrinsic {
+            pub fn to_str(&self) -> &'static str {
+                 match self {
+                    $(Intrinsic::$name => stringify!($name)),*
+                }
+            }
+        }
+    }
+}
+
+intrinsics! {
+    debug
+}
+
 
 #[derive(Debug, Clone)]
 pub(crate) enum Expression<'tcx> {
@@ -62,10 +88,13 @@ pub(crate) enum Expression<'tcx> {
     Array(Vec<TypedExpression<'tcx>>),
     Call(Box<TypedExpression<'tcx>>, Vec<TypedExpression<'tcx>>),
     Tuple(Vec<TypedExpression<'tcx>>),
+    StructLiteral(Vec<TypedExpression<'tcx>>),
     Range(Box<TypedExpression<'tcx>>, Option<Box<TypedExpression<'tcx>>>),
     Cast(Box<TypedExpression<'tcx>>, TypeRef<'tcx>),
+    Field(Box<TypedExpression<'tcx>>, usize),
     Error,
     Var(Var),
+    Intrinsic(Intrinsic),
 }
 
 #[derive(Debug, Clone)]
@@ -180,9 +209,22 @@ fn deduce_expr_ty<'tcx>(
                 ty,
             }
         }
-        ast::Expression::Place(expr, ty) => {
-            log::debug!("unsupported place expr");
-            unimplemented!()
+        ast::Expression::Place(expr, field) => {
+            let lhs = deduce_expr_ty(expr, arena, &locals, defined_types);
+
+            let Some(name) = field.as_str() else {
+                unimplemented!()
+            };
+
+            let (idx, (_, ty)) = match &lhs.ty {
+                Type::Struct { fields } => fields.iter().enumerate().find(|(idx, (n, _))| n == name).unwrap(),
+                _ => unimplemented!(),
+            };
+
+            TypedExpression {
+                ty,
+                expr: Expression::Field(Box::new(lhs), idx),
+            }
         }
         ast::Expression::Array(items) => {
             if items.is_empty() {
@@ -210,19 +252,20 @@ fn deduce_expr_ty<'tcx>(
             }
         }
         ast::Expression::Call(callee, args) => {
-            let callee = deduce_expr_ty(callee, arena, locals, defined_types);
-            match &callee.expr {
-                Expression::Identifier(ident) => {
-                    let callee_ty = match ident.as_str() {
+            match callee.as_ref() {
+                ast::Expression::Identifier(ident) => {
+                    let callee = match ident.as_str() {
                         "debug" => {
-                            arena.alloc(Type::Function(vec![&Type::Any], &Type::Unit))
+                            let ty = arena.alloc(Type::Function(vec![&Type::Any], &Type::Any));
+                            TypedExpression { ty, expr: Expression::Intrinsic(Intrinsic::debug) }
                         }
                         other => {
-                            locals.get(other).unwrap_or_else(|| panic!("a type for {}", other))
+                            let ty = locals.get(other).unwrap_or_else(|| panic!("a type for {}", other));
+                            deduce_expr_ty(callee, arena, locals, defined_types)
                         }
                     };
 
-                    let (args_ty, ret_ty) = match callee_ty {
+                    let (args_ty, ret_ty) = match callee.ty {
                         Type::Function(args_ty, ret_ty) => (args_ty, ret_ty),
                         _ => {
                             log::debug!("{} is not callable", ident.as_str());
@@ -305,6 +348,21 @@ fn deduce_expr_ty<'tcx>(
                 ty: target_ty,
             }
         }
+        ast::Expression::StructLiteral(expr, fields) => {
+            let ty = match expr {
+                Some(name) => defined_types[name.as_str()],
+                None => &Type::Unknown,
+            };
+
+            let fields = fields
+                .iter()
+                .map(|(name, expr)| deduce_expr_ty(expr, arena, locals, defined_types))
+                .collect();
+            TypedExpression {
+                expr: Expression::StructLiteral(fields),
+                ty,
+            }
+        }
     }
 }
 
@@ -319,16 +377,16 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
 
     for item in items.iter() {
         let item = match item {
-            ast::Item::Let { name, r#type: ty, expr } => {
+            ast::Item::Let { name, r#type: expected_ty, expr } => {
                 if expr.is_none() {
                     log::debug!("no expression on the right hand side of the let binding");
                     continue;
                 }
                 let expr = deduce_expr_ty(expr.as_ref().unwrap(), arena, &locals, defined_types);
                 log::debug!("deduced type {:?} for binding {}", expr.ty, name);
-                let ty = match ty {
-                    Some(ty) => {
-                        let ty = unify(ty, arena, defined_types);
+                let ty = match expected_ty {
+                    Some(expected) => {
+                        let ty = unify(expected, arena, defined_types);
                         if !is_compatible_to(ty, expr.ty) {
                             log::debug!("mismatched types. expected {:?}, got {:?}", ty, expr.ty);
                             continue;
@@ -392,11 +450,10 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast>(
                 }
             }
             ast::Item::Struct { name, fields } => {
-                defined_types.insert(name, arena.alloc(Type::Unknown));
                 let fields: Vec<_> = fields.iter().map(|field| {
                     (field.name.clone(), unify(&field.r#type, arena, defined_types))
                 }).collect();
-                arena.alloc(Type::Struct { fields });
+                defined_types.insert(name, arena.alloc(Type::Struct { fields }));
                 continue;
             }
             ast::Item::If {

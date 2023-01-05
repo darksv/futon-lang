@@ -17,7 +17,11 @@ impl Var {
 
 impl fmt::Debug for Var {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        write!(f, "_{}", self.0)
+        if self.0 == usize::MAX {
+            write!(f, "<error>>")
+        } else {
+            write!(f, "_{}", self.0)
+        }
     }
 }
 
@@ -28,6 +32,7 @@ pub(crate) enum Const {
     I32(i32),
     F32(f32),
     Bool(bool),
+    Struct,
     Undefined,
 }
 
@@ -59,6 +64,8 @@ enum Instr {
     BinaryOperation(Var, ast::Operator, Var, Var),
     SetElement(Var, usize, Var),
     GetElement(Var, Var, Var),
+    SetField(Var, usize, Var),
+    GetField(Var, Var, usize),
     Call(Var, String, Vec<Var>),
     Cast(Var, Var, CastType),
 }
@@ -99,6 +106,12 @@ impl fmt::Debug for Instr {
             Instr::Call(target, ident, args) => {
                 write!(f, "{:?} = {}({:?})", target, ident, args)
             }
+            Instr::SetField(target, field, value) => {
+                write!(f, "{:?}.{} = {:?}", target, field, value)
+            }
+            Instr::GetField(var, base, value) => {
+                write!(f, "{:?} = {:?}.{}", var, base, value)
+            }
         }
     }
 }
@@ -112,6 +125,7 @@ enum Terminator {
     JumpIf(Var, Block, Block),
     Return,
     Unreachable,
+    Assert(Var, Block),
 }
 
 #[derive(Debug)]
@@ -160,6 +174,7 @@ pub(crate) fn dump_ir(ir: &FunctionIr<'_>, f: &mut impl Write) -> io::Result<()>
             Terminator::JumpIf(v, bt, bf) => writeln!(f, "    JumpIf(_{}, _bb{}, _bb{});", v.0, bt.0, bf.0)?,
             Terminator::Return => writeln!(f, "    Return;")?,
             Terminator::Unreachable => writeln!(f, "    Unreachable;")?,
+            Terminator::Assert(v, next) => writeln!(f, "    Assert(_{}, _bb{});", v.0, next.0)?,
         }
         writeln!(f, "  }}")?;
     }
@@ -286,8 +301,9 @@ fn visit_expr<'tcx>(
         }
         Expression::Call(func, args) => {
             let ident = match &func.expr {
-                Expression::Identifier(ident) => { ident }
-                _ => todo!(),
+                Expression::Identifier(ident) => ident.clone(),
+                Expression::Intrinsic(id) => format!("intrinsic.{}", id.to_str()),
+                other => todo!("{:?}", other),
             };
 
             let mut params = Vec::new();
@@ -296,10 +312,10 @@ fn visit_expr<'tcx>(
             }
 
             let ret = builder.make_var(expr.ty, Some("Return of"));
-            builder.push(block, Instr::Call(ret, ident.clone(), params));
+            builder.push(block, Instr::Call(ret, ident, params));
             ret
         }
-        Expression::Tuple(_) | Expression::Range(_, _) => Var::error(),
+        Expression::Range(_, _) => Var::error(),
         Expression::Var(var) => var.clone(),
         Expression::Error => Var::error(),
         Expression::Cast(expr, target_ty) => {
@@ -311,6 +327,21 @@ fn visit_expr<'tcx>(
                 (a, b) => todo!("{:?} {:?}", a, b),
             }));
             var
+        }
+        Expression::Intrinsic(_) => panic!(),
+        Expression::Tuple(fields) | Expression::StructLiteral(fields) => {
+            let var = builder.make_var(expr.ty, None);
+            for (idx, field) in fields.iter().enumerate() {
+                let x = visit_expr(&field, builder, names, block);
+                builder.push(block, Instr::SetField(var, idx, x));
+            }
+            var
+        }
+        Expression::Field(expr, idx) => {
+            let base = visit_expr(&expr, builder, names, block);
+            let element_var = builder.make_var(expr.ty, None);
+            builder.push(block, Instr::GetField(element_var, base, *idx));
+            element_var
         }
     }
 }
@@ -552,6 +583,9 @@ fn visit_item<'tcx>(
         Item::Function { .. } => {
             block
         }
+        Item::Assert(expr) => {
+            block
+        }
         other => unimplemented!("{:?}", other),
     }
 }
@@ -601,6 +635,15 @@ pub(crate) fn execute_ir(ir: &FunctionIr<'_>, args: &[Const], functions: &HashMa
                         match vars.get(src).copied() {
                             Some(var) => {
                                 vars.insert(*dst, var);
+
+                                if let Const::Struct = var {
+                                    // Copy all fields
+                                    let mut idx = 0;
+                                    while let Some(c) = vars_arrays.get(&(*src, idx)) {
+                                        vars_arrays.insert((*dst, idx), c.clone());
+                                        idx += 1;
+                                    }
+                                }
                             }
                             None => {
                                 let mut to_copy = vec![];
@@ -703,10 +746,27 @@ pub(crate) fn execute_ir(ir: &FunctionIr<'_>, args: &[Const], functions: &HashMa
                         });
                     }
                     Instr::Call(target, name, args) => {
-                        let func = &functions[name];
-                        let args: Vec<_> = args.iter().map(|it| vars[it]).collect();
-                        let result = execute_ir(func, &args, functions);
-                        vars.insert(*target, result);
+                        match name.as_str() {
+                            "intrinsic.debug" => {
+                                assert_eq!(args.len(), 1);
+                                let value = vars[&args[0]];
+                                log::debug!("Debug value: {:?}", &value);
+                                vars.insert(*target, value);
+                            }
+                            name => {
+                                let func = &functions[name];
+                                let args: Vec<_> = args.iter().map(|it| vars[it]).collect();
+                                let result = execute_ir(func, &args, functions);
+                                vars.insert(*target, result);
+                            }
+                        }
+                    }
+                    Instr::SetField(lhs, idx, rhs) => {
+                        vars_arrays.insert((*lhs, *idx), vars[rhs]);
+                        vars.insert(*lhs, Const::Struct);
+                    }
+                    Instr::GetField(target, lhs, idx) => {
+                        vars.insert(*target, vars_arrays.get(&(*lhs, *idx)).cloned().unwrap());
                     }
                 }
                 curr_inst += 1;
@@ -738,6 +798,18 @@ pub(crate) fn execute_ir(ir: &FunctionIr<'_>, args: &[Const], functions: &HashMa
                 Terminator::Unreachable => {
                     log::warn!("executing unreachable");
                     return Const::Undefined;
+                }
+                Terminator::Assert(var, block) => {
+                    match vars[&var] {
+                        Const::Bool(true) => {
+                            curr_block = block.0;
+                            curr_inst = 0;
+                        }
+                        Const::Bool(false) => {
+                            log::error!("Assertion failed!!!!");
+                        }
+                        other => unimplemented!("{:?}", other),
+                    }
                 }
             }
         }

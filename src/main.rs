@@ -1,4 +1,4 @@
-#![feature(let_else)]
+#![feature(if_let_guard)]
 #![allow(clippy::match_like_matches_macro)]
 #![allow(unused)]
 
@@ -48,9 +48,7 @@ fn main() {
 fn run_test(path: impl AsRef<Path>) -> bool {
     let path = path.as_ref();
     print!("Testing {} --- ", path.display());
-    std::panic::catch_unwind(|| {
-        compile_file(path)
-    }).unwrap_or(false)
+    std::panic::catch_unwind(|| compile_file(path)).unwrap_or(false)
 }
 
 fn compile_file(path: impl AsRef<Path>) -> bool {
@@ -61,18 +59,19 @@ fn compile_file(path: impl AsRef<Path>) -> bool {
     let arena = Arena::default();
     let mut parser = Parser::new(lex);
     match parser.parse() {
-        Ok(ref mut k) => {
+        Ok(mut items) => {
             let mut locals = HashMap::new();
 
             let mut types = HashMap::new();
-            let items = infer_types(k, &arena, &mut locals, None, &mut types);
+            let items = infer_types(&mut items, &arena, &mut locals, None, &mut types);
+
             let mut functions = HashMap::new();
             let mut asserts = Vec::new();
             for item in &items {
                 match item {
                     Item::Function { name, .. } => {
                         let ir = build_ir(&item, &arena).unwrap();
-                        // dump_ir(&ir, &mut std::io::stdout()).unwrap();
+                        dump_ir(&ir, &mut std::io::stdout()).unwrap();
                         functions.insert(name.clone(), ir);
                     }
                     Item::Assert(expr) => {

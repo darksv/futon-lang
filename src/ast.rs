@@ -59,6 +59,16 @@ pub(crate) enum Expression {
     Index(Box<Expression>, Box<Expression>),
     Cast(Box<Expression>, Type),
     Var(Var),
+    StructLiteral(Option<String>, Vec<(String, Expression)>),
+}
+
+impl Expression {
+    pub(crate) fn as_str(&self) -> Option<&str> {
+        match self {
+            Expression::Identifier(s) => Some(s),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug)]

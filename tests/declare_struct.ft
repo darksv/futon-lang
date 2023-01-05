@@ -1,4 +1,20 @@
 struct Foo {
-    a: u32,
+    a: i32,
     b: (f32, f32)
 }
+
+fn main() -> i32 {
+    let x = [21, 37, 420, 69];
+    let sum: i32 = 0;
+    for y in x {
+        let foo: Foo = Foo {
+            .a = y,
+            .b = (21.0, 37.0),
+        };
+        sum += foo.a;
+    }
+
+    return sum;
+}
+
+assert main() == 547;
