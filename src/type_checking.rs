@@ -103,7 +103,6 @@ pub(crate) enum Expression<'expr> {
 }
 
 
-
 #[derive(Debug, Clone)]
 pub(crate) struct Argument<'tcx> {
     pub(crate) name: String,
@@ -586,7 +585,11 @@ fn unify<'tcx>(
                 "u32" => arena.alloc(Type::U32),
                 "f32" => arena.alloc(Type::F32),
                 "bool" => arena.alloc(Type::Bool),
-                custom => defined_types[custom],
+                custom if let Some(ty) = defined_types.get(custom) => ty,
+                custom => {
+                    log::warn!("missing type for custom {:?}", custom);
+                    return &Type::Unknown;
+                }
             }
         }
         ast::Type::Tuple(types) => {
