@@ -5,7 +5,7 @@ use std::io::Write;
 
 use crate::{Arena, ast};
 use crate::types::{TypeRef, Type};
-use crate::type_checking::{Expression, ExprRef, ExprToType, Item};
+use crate::type_checking::{Expression, ExprRef, ExprToType, Item, make_expr};
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
 pub(crate) struct Var(usize);
@@ -239,7 +239,7 @@ impl<'tcx> IrBuilder<'tcx> {
 
 
 fn visit_expr<'expr, 'tcx>(
-    expr: &'expr Expression<'expr>,
+    expr: ExprRef<'expr>,
     builder: &mut IrBuilder<'tcx>,
     names: &HashMap<String, Var>,
     block: Block,
@@ -350,7 +350,6 @@ fn visit_expr<'expr, 'tcx>(
     }
 }
 
-
 fn visit_item<'expr, 'tcx>(
     item: &Item<'expr, 'tcx>,
     arena: &'tcx Arena<Type<'tcx>>,
@@ -362,15 +361,6 @@ fn visit_item<'expr, 'tcx>(
     exprs: &'expr Arena<Expression<'expr>>,
     type_by_expr: &mut ExprToType<'tcx>,
 ) -> Block {
-    let make_expr = |exprs: &'expr Arena<Expression<'expr>>,
-                     type_by_expr: &mut ExprToType<'tcx>,
-                     ty: TypeRef<'tcx>,
-                     expr: Expression<'expr>| -> ExprRef<'expr> {
-        let expr = exprs.alloc(expr);
-        type_by_expr.insert(expr, ty);
-        expr
-    };
-
     match item {
         Item::Let { name, ty, expr } => {
             let var = builder.make_var(ty, Some(name.as_str()));

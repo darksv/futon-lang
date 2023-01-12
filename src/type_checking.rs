@@ -103,7 +103,7 @@ pub(crate) struct Argument<'tcx> {
 
 #[derive(Debug, Clone)]
 pub(crate) enum Item<'expr, 'tcx> {
-    Let { name: String, ty: TypeRef<'tcx>, expr: Option<&'expr Expression<'expr>> },
+    Let { name: String, ty: TypeRef<'tcx>, expr: Option<ExprRef<'expr>> },
     Assignment { lhs: ExprRef<'expr>, operator: Option<ast::Operator>, expr: ExprRef<'expr> },
     Expression { expr: ExprRef<'expr> },
     Function {
@@ -158,6 +158,17 @@ impl<'tcx> ExprToType<'tcx> {
     }
 }
 
+pub(crate) fn make_expr<'expr, 'tcx>(
+    exprs: &'expr Arena<Expression<'expr>>,
+    type_by_expr: &mut ExprToType<'tcx>,
+    ty: TypeRef<'tcx>,
+    expr: Expression<'expr>
+) -> ExprRef<'expr> {
+    let expr = exprs.alloc(expr);
+    type_by_expr.insert(expr, ty);
+    expr
+}
+
 fn deduce_expr_ty<'tcx, 'expr>(
     expr: &ast::Expression,
     arena: &'tcx Arena<Type<'tcx>>,
@@ -166,15 +177,6 @@ fn deduce_expr_ty<'tcx, 'expr>(
     exprs: &'expr Arena<Expression<'expr>>,
     type_by_expr: &mut ExprToType<'tcx>,
 ) -> ExprRef<'expr> {
-    let make_expr = |exprs: &'expr Arena<Expression<'expr>>,
-                     type_by_expr: &mut ExprToType<'tcx>,
-                     ty: TypeRef<'tcx>,
-                     expr: Expression<'expr>| -> ExprRef<'expr> {
-        let expr = exprs.alloc(expr);
-        type_by_expr.insert(expr, ty);
-        expr
-    };
-
     let (expr, ty) = match expr {
         ast::Expression::Integer(val) => (Expression::Integer(*val), arena.alloc(Type::I32)),
         ast::Expression::Float(val) => (Expression::Float(*val), arena.alloc(Type::F32)),
