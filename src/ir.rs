@@ -37,7 +37,7 @@ pub(crate) enum Const {
     Undefined,
 }
 
-impl Expression<'_, '_> {
+impl Expression<'_> {
     pub(crate) fn as_const(&self) -> Option<Const> {
         match self {
             Expression::Integer(x) => Some(Const::I32(*x as _)),
@@ -239,11 +239,11 @@ impl<'tcx> IrBuilder<'tcx> {
 
 
 fn visit_expr<'expr, 'tcx>(
-    expr: &'expr Expression<'expr, 'tcx>,
+    expr: &'expr Expression<'expr>,
     builder: &mut IrBuilder<'tcx>,
     names: &HashMap<String, Var>,
     block: Block,
-    exprs: &'expr Arena<Expression<'expr, 'tcx>>,
+    exprs: &'expr Arena<Expression<'expr>>,
     type_by_expr: &mut ExprToType<'tcx>,
 ) -> Var {
     match expr {
@@ -322,10 +322,10 @@ fn visit_expr<'expr, 'tcx>(
         Expression::Range(_, _) => Var::error(),
         Expression::Var(var) => var.clone(),
         Expression::Error => Var::error(),
-        Expression::Cast(expr, target_ty) => {
-            let var = builder.make_var(type_by_expr.of(expr), None);
-            let x = visit_expr(&expr, builder, names, block, exprs, type_by_expr);
-            builder.push(block, Instr::Cast(var, x, match (type_by_expr.of(expr), target_ty) {
+        Expression::Cast(source_expr) => {
+            let var = builder.make_var(type_by_expr.of(source_expr), None);
+            let x = visit_expr(&source_expr, builder, names, block, exprs, type_by_expr);
+            builder.push(block, Instr::Cast(var, x, match (type_by_expr.of(source_expr), type_by_expr.of(expr)) {
                 (Type::F32, Type::I32) => CastType::F32ToI32,
                 (Type::I32, Type::F32) => CastType::I32ToF32,
                 (a, b) => todo!("{:?} {:?}", a, b),
@@ -359,12 +359,12 @@ fn visit_item<'expr, 'tcx>(
     ret: Option<Var>,
     after_loop: Option<Block>,
     block: Block,
-    exprs: &'expr Arena<Expression<'expr, 'tcx>>,
+    exprs: &'expr Arena<Expression<'expr>>,
     type_by_expr: &mut ExprToType<'tcx>,
 ) -> Block {
-    let make_expr = |exprs: &'expr Arena<Expression<'expr, 'tcx>>,
+    let make_expr = |exprs: &'expr Arena<Expression<'expr>>,
                      type_by_expr: &mut ExprToType<'tcx>,
-                     tye: TypedExpression<'expr, 'tcx>| -> ExprRef<'expr, 'tcx> {
+                     tye: TypedExpression<'expr, 'tcx>| -> ExprRef<'expr> {
         let expr = exprs.alloc(tye.expr);
         type_by_expr.insert(expr, tye.ty);
         expr
@@ -613,7 +613,7 @@ fn visit_item<'expr, 'tcx>(
 }
 
 pub(crate) fn build_ir<'expr, 'tcx>(item: &Item<'expr, 'tcx>, arena: &'tcx Arena<Type<'tcx>>,
-                             exprs: &'expr Arena<Expression<'expr, 'tcx>>,
+                             exprs: &'expr Arena<Expression<'expr>>,
                              type_by_expr: &mut ExprToType<'tcx>,
 ) -> Result<FunctionIr<'tcx>, ()> {
     let mut builder = IrBuilder::new();

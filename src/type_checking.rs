@@ -56,7 +56,7 @@ fn is_compatible_to(ty: TypeRef<'_>, subty: TypeRef<'_>) -> bool {
 #[derive(Debug, Clone)]
 pub(crate) struct TypedExpression<'expr, 'tcx> {
     pub(crate) ty: TypeRef<'tcx>,
-    pub(crate) expr: Expression<'expr, 'tcx>,
+    pub(crate) expr: Expression<'expr>,
 }
 
 macro_rules! intrinsics {
@@ -79,24 +79,24 @@ intrinsics! {
     debug
 }
 
-pub(crate) type ExprRef<'e, 'tcx> = &'e Expression<'e, 'tcx>;
+pub(crate) type ExprRef<'expr> = &'expr Expression<'expr>;
 
 #[derive(Debug, Clone)]
-pub(crate) enum Expression<'expr, 'tcx> {
+pub(crate) enum Expression<'expr> {
     Identifier(String),
     Integer(i64),
     Float(f64),
     Bool(bool),
-    Infix(ast::Operator, ExprRef<'expr, 'tcx>, ExprRef<'expr, 'tcx>),
-    Prefix(ast::Operator, ExprRef<'expr, 'tcx>),
-    Index(ExprRef<'expr, 'tcx>, ExprRef<'expr, 'tcx>),
-    Array(Vec<ExprRef<'expr, 'tcx>>),
-    Call(ExprRef<'expr, 'tcx>, Vec<ExprRef<'expr, 'tcx>>),
-    Tuple(Vec<ExprRef<'expr, 'tcx>>),
-    StructLiteral(Vec<ExprRef<'expr, 'tcx>>),
-    Range(ExprRef<'expr, 'tcx>, Option<ExprRef<'expr, 'tcx>>),
-    Cast(ExprRef<'expr, 'tcx>, TypeRef<'tcx>),
-    Field(ExprRef<'expr, 'tcx>, usize),
+    Infix(ast::Operator, ExprRef<'expr>, ExprRef<'expr>),
+    Prefix(ast::Operator, ExprRef<'expr>),
+    Index(ExprRef<'expr>, ExprRef<'expr>),
+    Array(Vec<ExprRef<'expr>>),
+    Call(ExprRef<'expr>, Vec<ExprRef<'expr>>),
+    Tuple(Vec<ExprRef<'expr>>),
+    StructLiteral(Vec<ExprRef<'expr>>),
+    Range(ExprRef<'expr>, Option<ExprRef<'expr>>),
+    Cast(ExprRef<'expr>),
+    Field(ExprRef<'expr>, usize),
     Error,
     Var(Var),
     Intrinsic(Intrinsic),
@@ -112,9 +112,9 @@ pub(crate) struct Argument<'tcx> {
 
 #[derive(Debug, Clone)]
 pub(crate) enum Item<'expr, 'tcx> {
-    Let { name: String, ty: TypeRef<'tcx>, expr: Option<&'expr Expression<'expr, 'tcx>> },
-    Assignment { lhs: &'expr Expression<'expr, 'tcx>, operator: Option<ast::Operator>, expr: &'expr Expression<'expr, 'tcx> },
-    Expression { expr: &'expr Expression<'expr, 'tcx> },
+    Let { name: String, ty: TypeRef<'tcx>, expr: Option<&'expr Expression<'expr>> },
+    Assignment { lhs: ExprRef<'expr>, operator: Option<ast::Operator>, expr: ExprRef<'expr> },
+    Expression { expr: ExprRef<'expr> },
     Function {
         name: String,
         is_extern: bool,
@@ -123,23 +123,23 @@ pub(crate) enum Item<'expr, 'tcx> {
         body: Vec<Item<'expr, 'tcx>>,
     },
     If {
-        condition: &'expr Expression<'expr, 'tcx>,
+        condition: ExprRef<'expr>,
         arm_true: Vec<Item<'expr, 'tcx>>,
         arm_false: Option<Vec<Item<'expr, 'tcx>>>,
     },
     ForIn {
         name: String,
-        expr: &'expr Expression<'expr, 'tcx>,
+        expr: ExprRef<'expr>,
         body: Vec<Item<'expr, 'tcx>>,
     },
     Loop {
         body: Vec<Item<'expr, 'tcx>>,
     },
     Break,
-    Yield(&'expr Expression<'expr, 'tcx>),
-    Return(&'expr Expression<'expr, 'tcx>),
+    Yield(ExprRef<'expr>),
+    Return(ExprRef<'expr>),
     Block(Vec<Item<'expr, 'tcx>>),
-    Assert(&'expr Expression<'expr, 'tcx>),
+    Assert(ExprRef<'expr>),
 }
 
 pub(crate) struct ExprToType<'tcx> {
@@ -153,11 +153,11 @@ impl<'tcx> ExprToType<'tcx> {
         }
     }
 
-    pub(crate) fn insert(&mut self, xx: &Expression<'_, 'tcx>, ty: TypeRef<'tcx>) {
-        self.map.insert(addr_of!(*xx).cast(), ty);//.unwrap();
+    pub(crate) fn insert(&mut self, expr: ExprRef<'_>, ty: TypeRef<'tcx>) {
+        self.map.insert(addr_of!(*expr).cast(), ty);//.unwrap();
     }
 
-    pub(crate) fn of(&self, expr: &Expression<'_, 'tcx>) -> TypeRef<'tcx> {
+    pub(crate) fn of(&self, expr: ExprRef<'_>) -> TypeRef<'tcx> {
         match self.map.get(&addr_of!(*expr).cast()) {
             Some(t) => t,
             None => &Type::Unknown,
@@ -170,12 +170,12 @@ fn deduce_expr_ty<'tcx, 'expr>(
     arena: &'tcx Arena<Type<'tcx>>,
     locals: &HashMap<&str, TypeRef<'tcx>>,
     defined_types: &HashMap<&str, TypeRef<'tcx>>,
-    exprs: &'expr Arena<Expression<'expr, 'tcx>>,
+    exprs: &'expr Arena<Expression<'expr>>,
     type_by_expr: &mut ExprToType<'tcx>,
-) -> &'expr Expression<'expr, 'tcx> {
-    let make_expr = |exprs: &'expr Arena<Expression<'expr, 'tcx>>,
+) -> ExprRef<'expr> {
+    let make_expr = |exprs: &'expr Arena<Expression<'expr>>,
                      type_by_expr: &mut ExprToType<'tcx>,
-                     tye: TypedExpression<'expr, 'tcx>| -> &'expr Expression<'expr, 'tcx> {
+                     tye: TypedExpression<'expr, 'tcx>| -> &'expr Expression<'expr> {
         let expr = exprs.alloc(tye.expr);
         type_by_expr.insert(expr, tye.ty);
         expr
@@ -379,7 +379,7 @@ fn deduce_expr_ty<'tcx, 'expr>(
             let expr = deduce_expr_ty(expr, arena, locals, defined_types, exprs, type_by_expr);
             let target_ty = unify(ty, arena, defined_types);
             TypedExpression {
-                expr: Expression::Cast(expr, target_ty),
+                expr: Expression::Cast(expr),
                 ty: target_ty,
             }
         }
@@ -408,7 +408,7 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast, 'expr>(
     locals: &mut HashMap<&'ast str, TypeRef<'tcx>>,
     expected_ret_ty: Option<TypeRef<'tcx>>,
     defined_types: &mut HashMap<&'ast str, TypeRef<'tcx>>,
-    exprs: &'expr Arena<Expression<'expr, 'tcx>>,
+    exprs: &'expr Arena<Expression<'expr>>,
     type_by_expr: &mut ExprToType<'tcx>,
 ) -> Vec<Item<'expr, 'tcx>> {
     let mut lowered_items = Vec::new();
