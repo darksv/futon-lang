@@ -154,7 +154,9 @@ impl<'tcx> ExprToType<'tcx> {
     }
 
     pub(crate) fn insert(&mut self, expr: ExprRef<'_>, ty: TypeRef<'tcx>) {
-        self.map.insert(addr_of!(*expr).cast(), ty);//.unwrap();
+        if let Some(old) = self.map.insert(addr_of!(*expr).cast(), ty) {
+            assert_eq!(old, ty, "type should not change");
+        }
     }
 
     pub(crate) fn of(&self, expr: ExprRef<'_>) -> TypeRef<'tcx> {
