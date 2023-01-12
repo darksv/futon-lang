@@ -15,7 +15,7 @@ use parser::Parser;
 use crate::arena::Arena;
 use crate::ast::Operator;
 use crate::ir::{build_ir, Const, dump_ir, execute_ir};
-use crate::type_checking::{Expression, ExprToType, infer_types, Item, TypedExpression};
+use crate::type_checking::{Expression, ExprToType, infer_types, Item};
 
 mod arena;
 mod ast;
