@@ -118,8 +118,7 @@ impl<'lex> Parser<'lex> {
     }
 
     fn parse_expr(&mut self, precedence: isize) -> ParseResult<ast::Expression> {
-        self
-            .parse_expr_opt(precedence)?
+        self.parse_expr_opt(precedence)?
             .ok_or(ParseError::Custom("missing expression"))
     }
 

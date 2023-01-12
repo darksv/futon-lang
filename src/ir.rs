@@ -1,11 +1,11 @@
-use std::{fmt, io};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::Write;
+use std::{fmt, io};
 
-use crate::{Arena, ast};
-use crate::types::{TypeRef, Type};
-use crate::type_checking::{Expression, ExprRef, ExprToType, Item, make_expr};
+use crate::type_checking::{make_expr, ExprRef, ExprToType, Expression, Item};
+use crate::types::{Type, TypeRef};
+use crate::{ast, Arena};
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
 pub(crate) struct Var(usize);
@@ -26,8 +26,7 @@ impl fmt::Debug for Var {
     }
 }
 
-#[derive(Debug)]
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub(crate) enum Const {
     U32(u32),
     I32(i32),
@@ -44,7 +43,7 @@ impl Expression<'_> {
             Expression::Float(x) => Some(Const::F32(*x as _)),
             Expression::Prefix(ast::Operator::Negate, inner) => match inner.as_const()? {
                 Const::I32(val) => Some(Const::I32(-val)),
-                _ => None
+                _ => None,
             },
             Expression::Bool(x) => Some(Const::Bool(*x)),
             _ => None,
@@ -76,25 +75,38 @@ impl fmt::Debug for Instr {
         match self {
             Instr::Const(var, val) => write!(f, "{:?} = {:?}", var, val),
             Instr::Copy(lhs, rhs) => write!(f, "{:?} = {:?}", lhs, rhs),
-            Instr::BinaryOperation(left, op, a, b) => write!(f, "{:?} = {:?} {} {:?}", left, a, match op {
-                ast::Operator::Add => "+",
-                ast::Operator::Sub => "-",
-                ast::Operator::Mul => "*",
-                ast::Operator::Div => "/",
-                ast::Operator::Equal => "==",
-                ast::Operator::NotEqual => "!=",
-                ast::Operator::Less => "<",
-                ast::Operator::LessEqual => "<=",
-                ast::Operator::Greater => ">",
-                ast::Operator::GreaterEqual => ">=",
-                _ => unimplemented!()
-            }, b),
-            Instr::UnaryOperation(left, op, a) => write!(f, "{:?} = {}{:?}", left, match op {
-                ast::Operator::Negate => "-",
-                ast::Operator::Deref => "*",
-                ast::Operator::Ref => "&",
-                _ => unimplemented!("{:?}", op),
-            }, a),
+            Instr::BinaryOperation(left, op, a, b) => write!(
+                f,
+                "{:?} = {:?} {} {:?}",
+                left,
+                a,
+                match op {
+                    ast::Operator::Add => "+",
+                    ast::Operator::Sub => "-",
+                    ast::Operator::Mul => "*",
+                    ast::Operator::Div => "/",
+                    ast::Operator::Equal => "==",
+                    ast::Operator::NotEqual => "!=",
+                    ast::Operator::Less => "<",
+                    ast::Operator::LessEqual => "<=",
+                    ast::Operator::Greater => ">",
+                    ast::Operator::GreaterEqual => ">=",
+                    _ => unimplemented!(),
+                },
+                b
+            ),
+            Instr::UnaryOperation(left, op, a) => write!(
+                f,
+                "{:?} = {}{:?}",
+                left,
+                match op {
+                    ast::Operator::Negate => "-",
+                    ast::Operator::Deref => "*",
+                    ast::Operator::Ref => "&",
+                    _ => unimplemented!("{:?}", op),
+                },
+                a
+            ),
             Instr::SetElement(arr, index, val) => {
                 write!(f, "{:?}[{}] = {:?}", arr, index, val)
             }
@@ -162,7 +174,13 @@ pub(crate) fn dump_ir(ir: &FunctionIr<'_>, f: &mut impl Write) -> io::Result<()>
     writeln!(f, ") -> {:?} {{", ir.defines[ir.num_args].ty)?;
 
     for (idx, it) in ir.defines.iter().enumerate().skip(ir.num_args + 1) {
-        writeln!(f, "  let _{}: {:?}; // {}", idx, it.ty, &it.name.as_deref().unwrap_or(""))?;
+        writeln!(
+            f,
+            "  let _{}: {:?}; // {}",
+            idx,
+            it.ty,
+            &it.name.as_deref().unwrap_or("")
+        )?;
     }
 
     for (idx, block) in ir.blocks.iter().enumerate() {
@@ -172,7 +190,9 @@ pub(crate) fn dump_ir(ir: &FunctionIr<'_>, f: &mut impl Write) -> io::Result<()>
         }
         match block.terminator {
             Terminator::Jump(b) => writeln!(f, "    Jump(_bb{});", b.0)?,
-            Terminator::JumpIf(v, bt, bf) => writeln!(f, "    JumpIf(_{}, _bb{}, _bb{});", v.0, bt.0, bf.0)?,
+            Terminator::JumpIf(v, bt, bf) => {
+                writeln!(f, "    JumpIf(_{}, _bb{}, _bb{});", v.0, bt.0, bf.0)?
+            }
             Terminator::Return => writeln!(f, "    Return;")?,
             Terminator::Unreachable => writeln!(f, "    Unreachable;")?,
             Terminator::Assert(v, next) => writeln!(f, "    Assert(_{}, _bb{});", v.0, next.0)?,
@@ -193,7 +213,11 @@ struct IrBuilder<'tcx> {
 
 impl<'tcx> IrBuilder<'tcx> {
     fn new() -> Self {
-        Self { args: 0, vars: vec![], blocks: Default::default() }
+        Self {
+            args: 0,
+            vars: vec![],
+            blocks: Default::default(),
+        }
     }
 
     fn make_arg(&mut self, ty: TypeRef<'tcx>, name: Option<&str>) -> Var {
@@ -209,7 +233,10 @@ impl<'tcx> IrBuilder<'tcx> {
 
     fn make_var(&mut self, ty: TypeRef<'tcx>, name: Option<&str>) -> Var {
         let var = Var(self.vars.len());
-        self.vars.push(VarDef { ty, name: name.map(String::from) });
+        self.vars.push(VarDef {
+            ty,
+            name: name.map(String::from),
+        });
         var
     }
 
@@ -224,7 +251,10 @@ impl<'tcx> IrBuilder<'tcx> {
 
     fn block(&mut self) -> Block {
         let block = Block(self.blocks.len());
-        self.blocks.push(BlockBody { instrs: vec![], terminator: Terminator::Unreachable });
+        self.blocks.push(BlockBody {
+            instrs: vec![],
+            terminator: Terminator::Unreachable,
+        });
         block
     }
 
@@ -237,7 +267,6 @@ impl<'tcx> IrBuilder<'tcx> {
     }
 }
 
-
 fn visit_expr<'expr, 'tcx>(
     expr: ExprRef<'expr>,
     builder: &mut IrBuilder<'tcx>,
@@ -247,9 +276,7 @@ fn visit_expr<'expr, 'tcx>(
     type_by_expr: &mut ExprToType<'tcx>,
 ) -> Var {
     match expr {
-        Expression::Identifier(ident) => {
-            names[ident]
-        }
+        Expression::Identifier(ident) => names[ident],
         Expression::Integer(val) => {
             let var = builder.make_var(type_by_expr.of(expr), None);
             builder.push(block, Instr::Const(var, Const::I32(*val as i32)));
@@ -325,11 +352,18 @@ fn visit_expr<'expr, 'tcx>(
         Expression::Cast(source_expr) => {
             let var = builder.make_var(type_by_expr.of(source_expr), None);
             let x = visit_expr(&source_expr, builder, names, block, exprs, type_by_expr);
-            builder.push(block, Instr::Cast(var, x, match (type_by_expr.of(source_expr), type_by_expr.of(expr)) {
-                (Type::F32, Type::I32) => CastType::F32ToI32,
-                (Type::I32, Type::F32) => CastType::I32ToF32,
-                (a, b) => todo!("{:?} {:?}", a, b),
-            }));
+            builder.push(
+                block,
+                Instr::Cast(
+                    var,
+                    x,
+                    match (type_by_expr.of(source_expr), type_by_expr.of(expr)) {
+                        (Type::F32, Type::I32) => CastType::F32ToI32,
+                        (Type::I32, Type::F32) => CastType::I32ToF32,
+                        (a, b) => todo!("{:?} {:?}", a, b),
+                    },
+                ),
+            );
             var
         }
         Expression::Intrinsic(_) => panic!(),
@@ -373,7 +407,11 @@ fn visit_item<'expr, 'tcx>(
 
             block
         }
-        Item::Assignment { lhs, operator, expr } => {
+        Item::Assignment {
+            lhs,
+            operator,
+            expr,
+        } => {
             let rhs = visit_expr(&expr, builder, &local_names, block, exprs, type_by_expr);
             let lhs = match &lhs {
                 Expression::Identifier(ident) => local_names[ident],
@@ -394,8 +432,19 @@ fn visit_item<'expr, 'tcx>(
             visit_expr(&expr, builder, &local_names, block, exprs, type_by_expr);
             block
         }
-        Item::If { condition, arm_true, arm_false } => {
-            let cond_var = visit_expr(&condition, builder, &local_names, block, exprs, type_by_expr);
+        Item::If {
+            condition,
+            arm_true,
+            arm_false,
+        } => {
+            let cond_var = visit_expr(
+                &condition,
+                builder,
+                &local_names,
+                block,
+                exprs,
+                type_by_expr,
+            );
 
             let first_block_true = builder.block();
             let succ_block = builder.block();
@@ -403,7 +452,17 @@ fn visit_item<'expr, 'tcx>(
             let mut block_true = first_block_true;
             builder.set_terminator_of(first_block_true, Terminator::Jump(succ_block));
             for item in arm_true {
-                block_true = visit_item(item, arena, builder, local_names, ret, after_loop, block_true, exprs, type_by_expr);
+                block_true = visit_item(
+                    item,
+                    arena,
+                    builder,
+                    local_names,
+                    ret,
+                    after_loop,
+                    block_true,
+                    exprs,
+                    type_by_expr,
+                );
             }
 
             let block_false = if let Some(items) = arm_false {
@@ -412,7 +471,17 @@ fn visit_item<'expr, 'tcx>(
                 let mut block_false = first_block_false;
                 builder.set_terminator_of(block_false, Terminator::Jump(succ_block));
                 for item in items {
-                    block_false = visit_item(item, arena, builder, local_names, ret, after_loop, block_false, exprs, type_by_expr);
+                    block_false = visit_item(
+                        item,
+                        arena,
+                        builder,
+                        local_names,
+                        ret,
+                        after_loop,
+                        block_false,
+                        exprs,
+                        type_by_expr,
+                    );
                 }
 
                 first_block_false
@@ -420,7 +489,10 @@ fn visit_item<'expr, 'tcx>(
                 succ_block
             };
 
-            builder.set_terminator_of(block, Terminator::JumpIf(cond_var, first_block_true, block_false));
+            builder.set_terminator_of(
+                block,
+                Terminator::JumpIf(cond_var, first_block_true, block_false),
+            );
             succ_block
         }
         Item::Return(expr) => {
@@ -429,122 +501,200 @@ fn visit_item<'expr, 'tcx>(
             builder.set_terminator_of(block, Terminator::Return);
             block
         }
-        Item::ForIn { name, expr, body } => {
-            match type_by_expr.of(expr) {
-                &Type::Array(len, item_ty) => {
-                    let items_id = String::from("_items");
-                    let index_id = String::from("_x");
+        Item::ForIn { name, expr, body } => match type_by_expr.of(expr) {
+            &Type::Array(len, item_ty) => {
+                let items_id = String::from("_items");
+                let index_id = String::from("_x");
 
-                    let expr_ty = type_by_expr.of(expr);
-                    let items = vec![
-                        Item::Let {
-                            name: items_id.clone(),
-                            ty: expr_ty,
-                            expr: Some(expr.clone()),
+                let expr_ty = type_by_expr.of(expr);
+                let items = vec![
+                    Item::Let {
+                        name: items_id.clone(),
+                        ty: expr_ty,
+                        expr: Some(expr.clone()),
+                    },
+                    Item::Let {
+                        name: index_id.clone(),
+                        ty: arena.alloc(Type::I32),
+                        expr: Some(make_expr(
+                            exprs,
+                            type_by_expr,
+                            &Type::I32,
+                            Expression::Integer(0),
+                        )),
+                    },
+                    Item::Loop {
+                        body: {
+                            let expr = Expression::Infix(
+                                ast::Operator::Equal,
+                                make_expr(
+                                    exprs,
+                                    type_by_expr,
+                                    &Type::I32,
+                                    Expression::Integer(len as i64),
+                                ),
+                                make_expr(
+                                    exprs,
+                                    type_by_expr,
+                                    &Type::I32,
+                                    Expression::Identifier(index_id.clone()),
+                                ),
+                            );
+
+                            let e = Expression::Index(
+                                make_expr(
+                                    exprs,
+                                    type_by_expr,
+                                    expr_ty,
+                                    Expression::Identifier(items_id),
+                                ),
+                                make_expr(
+                                    exprs,
+                                    type_by_expr,
+                                    &Type::U32,
+                                    Expression::Identifier(index_id.clone()),
+                                ),
+                            );
+
+                            let mut items = vec![
+                                Item::If {
+                                    condition: make_expr(exprs, type_by_expr, &Type::Bool, expr),
+                                    arm_true: vec![Item::Break],
+                                    arm_false: None,
+                                },
+                                Item::Let {
+                                    name: name.to_string(),
+                                    ty: item_ty,
+                                    expr: Some(make_expr(exprs, type_by_expr, item_ty, e)),
+                                },
+                            ];
+                            items.extend_from_slice(body);
+                            let e = Expression::Infix(
+                                ast::Operator::Add,
+                                make_expr(
+                                    exprs,
+                                    type_by_expr,
+                                    &Type::I32,
+                                    Expression::Identifier(index_id.clone()),
+                                ),
+                                make_expr(exprs, type_by_expr, &Type::I32, Expression::Integer(1)),
+                            );
+                            items.push(Item::Assignment {
+                                lhs: make_expr(
+                                    exprs,
+                                    type_by_expr,
+                                    &Type::I32,
+                                    Expression::Identifier(index_id),
+                                ),
+                                operator: None,
+                                expr: make_expr(exprs, type_by_expr, &Type::I32, e),
+                            });
+                            items
                         },
-                        Item::Let {
-                            name: index_id.clone(),
-                            ty: arena.alloc(Type::I32),
-                            expr: Some(make_expr(exprs, type_by_expr, &Type::I32, Expression::Integer(0))),
-                        },
-                        Item::Loop {
-                            body: {
-                                let expr = Expression::Infix(
-                                    ast::Operator::Equal,
-                                    make_expr(exprs, type_by_expr, &Type::I32, Expression::Integer(len as i64)),
-                                    make_expr(exprs, type_by_expr, &Type::I32, Expression::Identifier(index_id.clone())),
-                                );
+                    },
+                ];
 
-                                let e = Expression::Index(
-                                    make_expr(exprs, type_by_expr, expr_ty, Expression::Identifier(items_id)),
-                                    make_expr(exprs, type_by_expr, &Type::U32, Expression::Identifier(index_id.clone())),
-                                );
-
-                                let mut items = vec![
-                                    Item::If {
-                                        condition: make_expr(exprs, type_by_expr, &Type::Bool, expr),
-                                        arm_true: vec![Item::Break],
-                                        arm_false: None,
-                                    },
-                                    Item::Let {
-                                        name: name.to_string(),
-                                        ty: item_ty,
-                                        expr: Some(make_expr(exprs, type_by_expr, item_ty, e)),
-                                    },
-                                ];
-                                items.extend_from_slice(body);
-                                let e = Expression::Infix(
-                                    ast::Operator::Add,
-                                    make_expr(exprs, type_by_expr, &Type::I32, Expression::Identifier(index_id.clone())),
-                                    make_expr(exprs, type_by_expr, &Type::I32, Expression::Integer(1)),
-                                );
-                                items.push(Item::Assignment {
-                                    lhs: make_expr(exprs, type_by_expr, &Type::I32, Expression::Identifier(index_id)),
-                                    operator: None,
-                                    expr: make_expr(exprs, type_by_expr, &Type::I32, e),
-                                });
-                                items
-                            }
-                        },
-                    ];
-
-                    visit_item(&Item::Block(items), arena, builder, local_names, ret, None, block, exprs, type_by_expr)
-                }
-                &Type::Range => {
-                    let Expression::Range(start_expr, end_expr) = &expr else {
+                visit_item(
+                    &Item::Block(items),
+                    arena,
+                    builder,
+                    local_names,
+                    ret,
+                    None,
+                    block,
+                    exprs,
+                    type_by_expr,
+                )
+            }
+            &Type::Range => {
+                let Expression::Range(start_expr, end_expr) = &expr else {
                         todo!();
                     };
-                    let end_expr = end_expr.as_ref().unwrap();
+                let end_expr = end_expr.as_ref().unwrap();
 
-                    let start = visit_expr(&start_expr, builder, local_names, block, exprs, type_by_expr);
-                    let end = visit_expr(&end_expr, builder, local_names, block, exprs, type_by_expr);
+                let start = visit_expr(
+                    &start_expr,
+                    builder,
+                    local_names,
+                    block,
+                    exprs,
+                    type_by_expr,
+                );
+                let end = visit_expr(&end_expr, builder, local_names, block, exprs, type_by_expr);
 
-                    let index = name.clone();
+                let index = name.clone();
 
-                    let items = vec![
-                        Item::Let {
-                            name: index.clone(),
-                            ty: &Type::I32,
-                            expr: Some(make_expr(exprs, type_by_expr, &Type::I32, Expression::Integer(0))),
+                let items = vec![
+                    Item::Let {
+                        name: index.clone(),
+                        ty: &Type::I32,
+                        expr: Some(make_expr(
+                            exprs,
+                            type_by_expr,
+                            &Type::I32,
+                            Expression::Integer(0),
+                        )),
+                    },
+                    Item::Loop {
+                        body: {
+                            let e = Expression::Infix(
+                                ast::Operator::Equal,
+                                make_expr(
+                                    exprs,
+                                    type_by_expr,
+                                    &Type::I32,
+                                    Expression::Identifier(index.clone()),
+                                ),
+                                make_expr(exprs, type_by_expr, &Type::I32, Expression::Var(end)),
+                            );
+                            let mut items = vec![Item::If {
+                                condition: make_expr(exprs, type_by_expr, &Type::Bool, e),
+                                arm_true: vec![Item::Break],
+                                arm_false: None,
+                            }];
+                            items.extend_from_slice(body);
+                            let e = Expression::Infix(
+                                ast::Operator::Add,
+                                make_expr(
+                                    exprs,
+                                    type_by_expr,
+                                    &Type::I32,
+                                    Expression::Identifier(index.clone()),
+                                ),
+                                make_expr(exprs, type_by_expr, &Type::I32, Expression::Integer(1)),
+                            );
+                            items.push(Item::Assignment {
+                                lhs: make_expr(
+                                    exprs,
+                                    type_by_expr,
+                                    &Type::I32,
+                                    Expression::Identifier(index),
+                                ),
+                                operator: None,
+                                expr: make_expr(exprs, type_by_expr, &Type::I32, e),
+                            });
+                            items
                         },
-                        Item::Loop {
-                            body: {
-                                let e = Expression::Infix(
-                                    ast::Operator::Equal,
-                                    make_expr(exprs, type_by_expr, &Type::I32, Expression::Identifier(index.clone())),
-                                    make_expr(exprs, type_by_expr, &Type::I32, Expression::Var(end)),
-                                );
-                                let mut items = vec![
-                                    Item::If {
-                                        condition: make_expr(exprs, type_by_expr, &Type::Bool, e),
-                                        arm_true: vec![Item::Break],
-                                        arm_false: None,
-                                    },
-                                ];
-                                items.extend_from_slice(body);
-                                let e = Expression::Infix(
-                                    ast::Operator::Add,
-                                    make_expr(exprs, type_by_expr, &Type::I32, Expression::Identifier(index.clone())),
-                                    make_expr(exprs, type_by_expr, &Type::I32, Expression::Integer(1)),
-                                );
-                                items.push(Item::Assignment {
-                                    lhs: make_expr(exprs, type_by_expr, &Type::I32, Expression::Identifier(index)),
-                                    operator: None,
-                                    expr: make_expr(exprs, type_by_expr, &Type::I32, e),
-                                });
-                                items
-                            }
-                        },
-                    ];
+                    },
+                ];
 
-                    visit_item(&Item::Block(items), arena, builder, local_names, ret, None, block, exprs, type_by_expr)
-                }
-                other => {
-                    log::error!("Unsupported {:?}", other);
-                    block
-                }
+                visit_item(
+                    &Item::Block(items),
+                    arena,
+                    builder,
+                    local_names,
+                    ret,
+                    None,
+                    block,
+                    exprs,
+                    type_by_expr,
+                )
             }
-        }
+            other => {
+                log::error!("Unsupported {:?}", other);
+                block
+            }
+        },
         Item::Break => {
             builder.set_terminator_of(block, Terminator::Jump(after_loop.unwrap()));
             block
@@ -562,7 +712,17 @@ fn visit_item<'expr, 'tcx>(
                     Item::Yield(_) => {}
                     Item::Return(_) => {}
                     other => {
-                        current = visit_item(other, arena, builder, local_names, ret, Some(after), current, exprs, type_by_expr);
+                        current = visit_item(
+                            other,
+                            arena,
+                            builder,
+                            local_names,
+                            ret,
+                            Some(after),
+                            current,
+                            exprs,
+                            type_by_expr,
+                        );
                         builder.set_terminator_of(current, Terminator::Jump(entry));
                     }
                 }
@@ -574,27 +734,41 @@ fn visit_item<'expr, 'tcx>(
             // FIXME: build a new block?
             let mut block = block;
             for item in body {
-                block = visit_item(item, arena, builder, local_names, ret, after_loop, block, exprs, type_by_expr);
+                block = visit_item(
+                    item,
+                    arena,
+                    builder,
+                    local_names,
+                    ret,
+                    after_loop,
+                    block,
+                    exprs,
+                    type_by_expr,
+                );
             }
             block
         }
-        Item::Function { .. } => {
-            block
-        }
-        Item::Assert(expr) => {
-            block
-        }
+        Item::Function { .. } => block,
+        Item::Assert(expr) => block,
         other => unimplemented!("{:?}", other),
     }
 }
 
-pub(crate) fn build_ir<'expr, 'tcx>(item: &Item<'expr, 'tcx>, arena: &'tcx Arena<Type<'tcx>>,
-                                    exprs: &'expr Arena<Expression<'expr>>,
-                                    type_by_expr: &mut ExprToType<'tcx>,
+pub(crate) fn build_ir<'expr, 'tcx>(
+    item: &Item<'expr, 'tcx>,
+    arena: &'tcx Arena<Type<'tcx>>,
+    exprs: &'expr Arena<Expression<'expr>>,
+    type_by_expr: &mut ExprToType<'tcx>,
 ) -> Result<FunctionIr<'tcx>, ()> {
     let mut builder = IrBuilder::new();
     match item {
-        Item::Function { name, is_extern, args, ty, body } if !is_extern => {
+        Item::Function {
+            name,
+            is_extern,
+            args,
+            ty,
+            body,
+        } if !is_extern => {
             let mut names = HashMap::new();
             for arg in args {
                 let var = builder.make_arg(arg.ty, Some(name.as_str()));
@@ -604,18 +778,31 @@ pub(crate) fn build_ir<'expr, 'tcx>(item: &Item<'expr, 'tcx>, arena: &'tcx Arena
 
             let mut block = builder.block();
             for item in body {
-                block = visit_item(item, arena, &mut builder, &mut names, Some(ret), None, block, exprs, type_by_expr);
+                block = visit_item(
+                    item,
+                    arena,
+                    &mut builder,
+                    &mut names,
+                    Some(ret),
+                    None,
+                    block,
+                    exprs,
+                    type_by_expr,
+                );
             }
 
             return Ok(builder.build(name.to_owned()));
         }
-        _ => eprintln!("trying generate ir of item that is not a function")
+        _ => eprintln!("trying generate ir of item that is not a function"),
     }
     Err(())
 }
 
-
-pub(crate) fn execute_ir(ir: &FunctionIr<'_>, args: &[Const], functions: &HashMap<String, FunctionIr<'_>>) -> Const {
+pub(crate) fn execute_ir(
+    ir: &FunctionIr<'_>,
+    args: &[Const],
+    functions: &HashMap<String, FunctionIr<'_>>,
+) -> Const {
     let mut curr_block = 0;
     let mut curr_inst = 0;
     let mut vars: HashMap<Var, Const> = HashMap::new();
@@ -680,43 +867,87 @@ pub(crate) fn execute_ir(ir: &FunctionIr<'_>, args: &[Const], functions: &HashMa
                         let val = match (op, a, b) {
                             (ast::Operator::Add, Const::I32(a), Const::I32(b)) => Const::I32(a + b),
                             (ast::Operator::Mul, Const::I32(a), Const::I32(b)) => Const::I32(a * b),
-                            (ast::Operator::Sub, Const::I32(a), Const::I32(b)) => Const::I32(a.saturating_sub(b)),
+                            (ast::Operator::Sub, Const::I32(a), Const::I32(b)) => {
+                                Const::I32(a.saturating_sub(b))
+                            }
                             (ast::Operator::Div, Const::I32(a), Const::I32(b)) => Const::I32(a / b),
-                            (ast::Operator::Less, Const::I32(a), Const::I32(b)) => Const::Bool(a < b),
-                            (ast::Operator::Greater, Const::I32(a), Const::I32(b)) => Const::Bool(a > b),
-                            (ast::Operator::Equal, Const::I32(a), Const::I32(b)) => Const::Bool(a == b),
-                            (ast::Operator::NotEqual, Const::I32(a), Const::I32(b)) => Const::Bool(a != b),
-                            (ast::Operator::LessEqual, Const::I32(a), Const::I32(b)) => Const::Bool(a <= b),
-                            (ast::Operator::GreaterEqual, Const::I32(a), Const::I32(b)) => Const::Bool(a >= b),
+                            (ast::Operator::Less, Const::I32(a), Const::I32(b)) => {
+                                Const::Bool(a < b)
+                            }
+                            (ast::Operator::Greater, Const::I32(a), Const::I32(b)) => {
+                                Const::Bool(a > b)
+                            }
+                            (ast::Operator::Equal, Const::I32(a), Const::I32(b)) => {
+                                Const::Bool(a == b)
+                            }
+                            (ast::Operator::NotEqual, Const::I32(a), Const::I32(b)) => {
+                                Const::Bool(a != b)
+                            }
+                            (ast::Operator::LessEqual, Const::I32(a), Const::I32(b)) => {
+                                Const::Bool(a <= b)
+                            }
+                            (ast::Operator::GreaterEqual, Const::I32(a), Const::I32(b)) => {
+                                Const::Bool(a >= b)
+                            }
 
                             (ast::Operator::Add, Const::U32(a), Const::U32(b)) => Const::U32(a + b),
                             (ast::Operator::Mul, Const::U32(a), Const::U32(b)) => Const::U32(a * b),
-                            (ast::Operator::Sub, Const::U32(a), Const::U32(b)) => Const::U32(a.saturating_sub(b)),
+                            (ast::Operator::Sub, Const::U32(a), Const::U32(b)) => {
+                                Const::U32(a.saturating_sub(b))
+                            }
                             (ast::Operator::Div, Const::U32(a), Const::U32(b)) => Const::U32(a / b),
-                            (ast::Operator::Less, Const::U32(a), Const::U32(b)) => Const::Bool(a < b),
-                            (ast::Operator::Greater, Const::U32(a), Const::U32(b)) => Const::Bool(a > b),
-                            (ast::Operator::Equal, Const::U32(a), Const::U32(b)) => Const::Bool(a == b),
-                            (ast::Operator::NotEqual, Const::U32(a), Const::U32(b)) => Const::Bool(a != b),
-                            (ast::Operator::LessEqual, Const::U32(a), Const::U32(b)) => Const::Bool(a <= b),
-                            (ast::Operator::GreaterEqual, Const::U32(a), Const::U32(b)) => Const::Bool(a >= b),
+                            (ast::Operator::Less, Const::U32(a), Const::U32(b)) => {
+                                Const::Bool(a < b)
+                            }
+                            (ast::Operator::Greater, Const::U32(a), Const::U32(b)) => {
+                                Const::Bool(a > b)
+                            }
+                            (ast::Operator::Equal, Const::U32(a), Const::U32(b)) => {
+                                Const::Bool(a == b)
+                            }
+                            (ast::Operator::NotEqual, Const::U32(a), Const::U32(b)) => {
+                                Const::Bool(a != b)
+                            }
+                            (ast::Operator::LessEqual, Const::U32(a), Const::U32(b)) => {
+                                Const::Bool(a <= b)
+                            }
+                            (ast::Operator::GreaterEqual, Const::U32(a), Const::U32(b)) => {
+                                Const::Bool(a >= b)
+                            }
 
                             (ast::Operator::Add, Const::F32(a), Const::F32(b)) => Const::F32(a + b),
                             (ast::Operator::Mul, Const::F32(a), Const::F32(b)) => Const::F32(a * b),
                             (ast::Operator::Sub, Const::F32(a), Const::F32(b)) => Const::F32(a - b),
                             (ast::Operator::Div, Const::F32(a), Const::F32(b)) => Const::F32(a / b),
-                            (ast::Operator::Less, Const::F32(a), Const::F32(b)) => Const::Bool(a < b),
-                            (ast::Operator::Greater, Const::F32(a), Const::F32(b)) => Const::Bool(a > b),
-                            (ast::Operator::Equal, Const::F32(a), Const::F32(b)) => Const::Bool(a == b),
-                            (ast::Operator::NotEqual, Const::F32(a), Const::F32(b)) => Const::Bool(a != b),
-                            (ast::Operator::LessEqual, Const::F32(a), Const::F32(b)) => Const::Bool(a <= b),
-                            (ast::Operator::GreaterEqual, Const::F32(a), Const::F32(b)) => Const::Bool(a >= b),
+                            (ast::Operator::Less, Const::F32(a), Const::F32(b)) => {
+                                Const::Bool(a < b)
+                            }
+                            (ast::Operator::Greater, Const::F32(a), Const::F32(b)) => {
+                                Const::Bool(a > b)
+                            }
+                            (ast::Operator::Equal, Const::F32(a), Const::F32(b)) => {
+                                Const::Bool(a == b)
+                            }
+                            (ast::Operator::NotEqual, Const::F32(a), Const::F32(b)) => {
+                                Const::Bool(a != b)
+                            }
+                            (ast::Operator::LessEqual, Const::F32(a), Const::F32(b)) => {
+                                Const::Bool(a <= b)
+                            }
+                            (ast::Operator::GreaterEqual, Const::F32(a), Const::F32(b)) => {
+                                Const::Bool(a >= b)
+                            }
 
                             (op, Const::Undefined, _) => {
-                                log::warn!("Propagating undefined value for {a:?} {op:?} {b:?} from {a:?}");
+                                log::warn!(
+                                    "Propagating undefined value for {a:?} {op:?} {b:?} from {a:?}"
+                                );
                                 Const::Undefined
                             }
                             (op, _, Const::Undefined) => {
-                                log::warn!("Propagating undefined value for {a:?} {op:?} {b:?} from {b:?}");
+                                log::warn!(
+                                    "Propagating undefined value for {a:?} {op:?} {b:?} from {b:?}"
+                                );
                                 Const::Undefined
                             }
                             (op, a, b) => {
@@ -739,29 +970,30 @@ pub(crate) fn execute_ir(ir: &FunctionIr<'_>, args: &[Const], functions: &HashMa
                     }
                     Instr::Cast(target, source, mode) => {
                         let source = vars.get(source).copied().unwrap_or(Const::Undefined);
-                        vars.insert(*target, match (mode, source) {
-                            (_, Const::Undefined) => Const::Undefined,
-                            (CastType::F32ToI32, Const::F32(val)) => Const::I32(val as i32),
-                            (CastType::I32ToF32, Const::I32(val)) => Const::F32(val as f32),
-                            _ => todo!(),
-                        });
+                        vars.insert(
+                            *target,
+                            match (mode, source) {
+                                (_, Const::Undefined) => Const::Undefined,
+                                (CastType::F32ToI32, Const::F32(val)) => Const::I32(val as i32),
+                                (CastType::I32ToF32, Const::I32(val)) => Const::F32(val as f32),
+                                _ => todo!(),
+                            },
+                        );
                     }
-                    Instr::Call(target, name, args) => {
-                        match name.as_str() {
-                            "intrinsic.debug" => {
-                                assert_eq!(args.len(), 1);
-                                let value = vars[&args[0]];
-                                log::debug!("Debug value: {:?}", &value);
-                                vars.insert(*target, value);
-                            }
-                            name => {
-                                let func = &functions[name];
-                                let args: Vec<_> = args.iter().map(|it| vars[it]).collect();
-                                let result = execute_ir(func, &args, functions);
-                                vars.insert(*target, result);
-                            }
+                    Instr::Call(target, name, args) => match name.as_str() {
+                        "intrinsic.debug" => {
+                            assert_eq!(args.len(), 1);
+                            let value = vars[&args[0]];
+                            log::debug!("Debug value: {:?}", &value);
+                            vars.insert(*target, value);
                         }
-                    }
+                        name => {
+                            let func = &functions[name];
+                            let args: Vec<_> = args.iter().map(|it| vars[it]).collect();
+                            let result = execute_ir(func, &args, functions);
+                            vars.insert(*target, result);
+                        }
+                    },
                     Instr::SetField(lhs, idx, rhs) => {
                         vars_arrays.insert((*lhs, *idx), vars[rhs]);
                         vars.insert(*lhs, Const::Struct);
@@ -777,42 +1009,38 @@ pub(crate) fn execute_ir(ir: &FunctionIr<'_>, args: &[Const], functions: &HashMa
                     curr_block = block.0;
                     curr_inst = 0;
                 }
-                Terminator::JumpIf(var, if_true, if_else) => {
-                    match vars[&var] {
-                        Const::Bool(v) => {
-                            curr_block = if v { if_true.0 } else { if_else.0 };
-                            curr_inst = 0;
-                        }
-                        Const::Undefined => {
-                            log::error!("trying to jump to undefined");
-                            return Const::Undefined;
-                        }
-                        other => unimplemented!("{:?}", other),
+                Terminator::JumpIf(var, if_true, if_else) => match vars[&var] {
+                    Const::Bool(v) => {
+                        curr_block = if v { if_true.0 } else { if_else.0 };
+                        curr_inst = 0;
                     }
-                }
+                    Const::Undefined => {
+                        log::error!("trying to jump to undefined");
+                        return Const::Undefined;
+                    }
+                    other => unimplemented!("{:?}", other),
+                },
                 Terminator::Return => {
                     return match vars.get(&Var(ir.num_args)) {
                         Some(x) => *x,
-                        None => Const::Undefined
+                        None => Const::Undefined,
                     };
                 }
                 Terminator::Unreachable => {
                     log::warn!("executing unreachable");
                     return Const::Undefined;
                 }
-                Terminator::Assert(var, block) => {
-                    match vars[&var] {
-                        Const::Bool(true) => {
-                            curr_block = block.0;
-                            curr_inst = 0;
-                        }
-                        Const::Bool(false) => {
-                            log::error!("Assertion failed!!!!");
-                        }
-                        other => unimplemented!("{:?}", other),
+                Terminator::Assert(var, block) => match vars[&var] {
+                    Const::Bool(true) => {
+                        curr_block = block.0;
+                        curr_inst = 0;
                     }
-                }
-            }
+                    Const::Bool(false) => {
+                        log::error!("Assertion failed!!!!");
+                    }
+                    other => unimplemented!("{:?}", other),
+                },
+            },
         }
     }
 }

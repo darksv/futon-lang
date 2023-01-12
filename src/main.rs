@@ -4,28 +4,28 @@
 
 extern crate core;
 
+use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::env;
 use std::path::Path;
-use indexmap::IndexMap;
 
 use lexer::{Keyword, Lexer, PunctKind, Token, TokenType};
 use parser::Parser;
 
 use crate::arena::Arena;
 use crate::ast::Operator;
-use crate::ir::{build_ir, Const, dump_ir, execute_ir};
-use crate::type_checking::{Expression, ExprToType, infer_types, Item};
+use crate::ir::{build_ir, dump_ir, execute_ir, Const};
+use crate::type_checking::{infer_types, ExprToType, Expression, Item};
 
 mod arena;
 mod ast;
 // mod codegen;
-mod lexer;
 mod ir;
+mod lexer;
 mod multi_peek;
 mod parser;
-mod types;
 mod type_checking;
+mod types;
 
 fn main() {
     env_logger::init();
@@ -67,7 +67,15 @@ fn compile_file(path: impl AsRef<Path>) -> bool {
             let exprs = Arena::default();
             let mut im = ExprToType::new();
 
-            let items = infer_types(&mut items, &arena, &mut locals, None, &mut types, &exprs, &mut im);
+            let items = infer_types(
+                &mut items,
+                &arena,
+                &mut locals,
+                None,
+                &mut types,
+                &exprs,
+                &mut im,
+            );
 
             let mut functions = HashMap::new();
             let mut asserts = Vec::new();

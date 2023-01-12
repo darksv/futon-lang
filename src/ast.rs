@@ -1,6 +1,6 @@
+use crate::ir::Var;
 use crate::lexer::SourceSpan;
 use crate::types::TypeRef;
-use crate::ir::Var;
 
 #[derive(Debug, Clone)]
 pub(crate) enum Type {
