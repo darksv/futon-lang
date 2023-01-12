@@ -2,8 +2,10 @@
 name = "untitled"
 version = "0.1.0"
 authors = ["darksv <darek969-12@o2.pl>"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 log = "0.4.8"
 env_logger = "0.7.1"
+generational-arena = "0.2.8"
+indexmap = "1.9.2"

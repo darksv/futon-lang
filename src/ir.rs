@@ -1,10 +1,11 @@
 use std::{fmt, io};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::Write;
 
 use crate::{Arena, ast};
 use crate::types::{TypeRef, Type};
-use crate::type_checking::{Expression, Item, TypedExpression};
+use crate::type_checking::{Expression, ExprRef, ExprToType, Item, TypedExpression};
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
 pub(crate) struct Var(usize);
@@ -36,12 +37,12 @@ pub(crate) enum Const {
     Undefined,
 }
 
-impl Expression<'_> {
+impl Expression<'_, '_> {
     pub(crate) fn as_const(&self) -> Option<Const> {
         match self {
             Expression::Integer(x) => Some(Const::I32(*x as _)),
             Expression::Float(x) => Some(Const::F32(*x as _)),
-            Expression::Prefix(ast::Operator::Negate, inner) => match inner.expr.as_const()? {
+            Expression::Prefix(ast::Operator::Negate, inner) => match inner.as_const()? {
                 Const::I32(val) => Some(Const::I32(-val)),
                 _ => None
             },
@@ -236,71 +237,74 @@ impl<'tcx> IrBuilder<'tcx> {
     }
 }
 
-fn visit_expr<'tcx>(
-    expr: &TypedExpression<'tcx>,
+
+fn visit_expr<'expr, 'tcx>(
+    expr: &'expr Expression<'expr, 'tcx>,
     builder: &mut IrBuilder<'tcx>,
     names: &HashMap<String, Var>,
     block: Block,
+    exprs: &'expr Arena<Expression<'expr, 'tcx>>,
+    type_by_expr: &mut ExprToType<'tcx>,
 ) -> Var {
-    match &expr.expr {
+    match expr {
         Expression::Identifier(ident) => {
             names[ident]
         }
         Expression::Integer(val) => {
-            let var = builder.make_var(expr.ty, None);
+            let var = builder.make_var(type_by_expr.of(expr), None);
             builder.push(block, Instr::Const(var, Const::I32(*val as i32)));
             var
         }
         Expression::Float(val) => {
-            let var = builder.make_var(expr.ty, None);
+            let var = builder.make_var(type_by_expr.of(expr), None);
             builder.push(block, Instr::Const(var, Const::F32(*val as f32)));
             var
         }
         Expression::Bool(val) => {
-            let var = builder.make_var(expr.ty, None);
+            let var = builder.make_var(type_by_expr.of(expr), None);
             builder.push(block, Instr::Const(var, Const::Bool(*val)));
             var
         }
         Expression::Prefix(op, rhs) => {
-            let var = builder.make_var(expr.ty, None);
-            let operand = visit_expr(rhs, builder, &names, block);
+            let var = builder.make_var(type_by_expr.of(expr), None);
+            let operand = visit_expr(&rhs, builder, &names, block, exprs, type_by_expr);
             builder.push(block, Instr::UnaryOperation(var, *op, operand));
             var
         }
         Expression::Infix(op, lhs, rhs) => {
-            let var = builder.make_var(expr.ty, None);
-            let a = visit_expr(lhs, builder, &names, block);
-            let b = visit_expr(rhs, builder, &names, block);
+            let var = builder.make_var(type_by_expr.of(expr), None);
+            let a = visit_expr(&lhs, builder, &names, block, exprs, type_by_expr);
+            let b = visit_expr(&rhs, builder, &names, block, exprs, type_by_expr);
             builder.push(block, Instr::BinaryOperation(var, *op, a, b));
             var
         }
         Expression::Array(elements) => {
-            let var = builder.make_var(expr.ty, None);
+            let var = builder.make_var(type_by_expr.of(expr), None);
             for (index, item) in elements.iter().enumerate() {
-                let expr = visit_expr(item, builder, names, block);
+                let expr = visit_expr(&item, builder, names, block, exprs, type_by_expr);
                 builder.push(block, Instr::SetElement(var, index, expr));
             }
             var
         }
         Expression::Index(slice, index) => {
-            let ty = match slice.ty {
+            let ty = match type_by_expr.of(slice) {
                 Type::Array(_, ty) => ty,
                 Type::Slice(_) => unimplemented!(),
                 _ => unreachable!(),
             };
 
-            let slice_var = match &slice.expr {
+            let slice_var = match &slice {
                 Expression::Identifier(ident) => names[ident],
                 _ => unimplemented!(),
             };
 
             let element_var = builder.make_var(ty, None);
-            let index_var = visit_expr(index, builder, names, block);
+            let index_var = visit_expr(&index, builder, names, block, exprs, type_by_expr);
             builder.push(block, Instr::GetElement(element_var, slice_var, index_var));
             element_var
         }
         Expression::Call(func, args) => {
-            let ident = match &func.expr {
+            let ident = match &func {
                 Expression::Identifier(ident) => ident.clone(),
                 Expression::Intrinsic(id) => format!("intrinsic.{}", id.to_str()),
                 other => todo!("{:?}", other),
@@ -308,10 +312,10 @@ fn visit_expr<'tcx>(
 
             let mut params = Vec::new();
             for arg in args {
-                params.push(visit_expr(arg, builder, names, block));
+                params.push(visit_expr(&arg, builder, names, block, exprs, type_by_expr));
             }
 
-            let ret = builder.make_var(expr.ty, Some("Return of"));
+            let ret = builder.make_var(type_by_expr.of(expr), Some("Return of"));
             builder.push(block, Instr::Call(ret, ident, params));
             ret
         }
@@ -319,9 +323,9 @@ fn visit_expr<'tcx>(
         Expression::Var(var) => var.clone(),
         Expression::Error => Var::error(),
         Expression::Cast(expr, target_ty) => {
-            let var = builder.make_var(expr.ty, None);
-            let x = visit_expr(expr, builder, names, block);
-            builder.push(block, Instr::Cast(var, x, match (expr.ty, target_ty) {
+            let var = builder.make_var(type_by_expr.of(expr), None);
+            let x = visit_expr(&expr, builder, names, block, exprs, type_by_expr);
+            builder.push(block, Instr::Cast(var, x, match (type_by_expr.of(expr), target_ty) {
                 (Type::F32, Type::I32) => CastType::F32ToI32,
                 (Type::I32, Type::F32) => CastType::I32ToF32,
                 (a, b) => todo!("{:?} {:?}", a, b),
@@ -330,46 +334,57 @@ fn visit_expr<'tcx>(
         }
         Expression::Intrinsic(_) => panic!(),
         Expression::Tuple(fields) | Expression::StructLiteral(fields) => {
-            let var = builder.make_var(expr.ty, None);
+            let var = builder.make_var(type_by_expr.of(expr), None);
             for (idx, field) in fields.iter().enumerate() {
-                let x = visit_expr(&field, builder, names, block);
+                let x = visit_expr(&&field, builder, names, block, exprs, type_by_expr);
                 builder.push(block, Instr::SetField(var, idx, x));
             }
             var
         }
         Expression::Field(expr, idx) => {
-            let base = visit_expr(&expr, builder, names, block);
-            let element_var = builder.make_var(expr.ty, None);
+            let base = visit_expr(&&expr, builder, names, block, exprs, type_by_expr);
+            let element_var = builder.make_var(type_by_expr.of(expr), None);
             builder.push(block, Instr::GetField(element_var, base, *idx));
             element_var
         }
     }
 }
 
-fn visit_item<'tcx>(
-    item: &Item<'tcx>,
+
+fn visit_item<'expr, 'tcx>(
+    item: &Item<'expr, 'tcx>,
     arena: &'tcx Arena<Type<'tcx>>,
     builder: &mut IrBuilder<'tcx>,
     local_names: &mut HashMap<String, Var>,
     ret: Option<Var>,
     after_loop: Option<Block>,
     block: Block,
+    exprs: &'expr Arena<Expression<'expr, 'tcx>>,
+    type_by_expr: &mut ExprToType<'tcx>,
 ) -> Block {
+    let make_expr = |exprs: &'expr Arena<Expression<'expr, 'tcx>>,
+                     type_by_expr: &mut ExprToType<'tcx>,
+                     tye: TypedExpression<'expr, 'tcx>| -> ExprRef<'expr, 'tcx> {
+        let expr = exprs.alloc(tye.expr);
+        type_by_expr.insert(expr, tye.ty);
+        expr
+    };
+
     match item {
         Item::Let { name, ty, expr } => {
             let var = builder.make_var(ty, Some(name.as_str()));
             local_names.insert(name.clone(), var);
 
             if let Some(expr) = expr {
-                let expr = visit_expr(expr, builder, &local_names, block);
+                let expr = visit_expr(&expr, builder, &local_names, block, exprs, type_by_expr);
                 builder.push(block, Instr::Copy(var, expr));
             }
 
             block
         }
         Item::Assignment { lhs, operator, expr } => {
-            let rhs = visit_expr(expr, builder, &local_names, block);
-            let lhs = match &lhs.expr {
+            let rhs = visit_expr(&expr, builder, &local_names, block, exprs, type_by_expr);
+            let lhs = match &lhs {
                 Expression::Identifier(ident) => local_names[ident],
                 Expression::Prefix(ast::Operator::Deref, expr) => {
                     todo!("deref");
@@ -385,11 +400,11 @@ fn visit_item<'tcx>(
             block
         }
         Item::Expression { expr } => {
-            visit_expr(expr, builder, &local_names, block);
+            visit_expr(&expr, builder, &local_names, block, exprs, type_by_expr);
             block
         }
         Item::If { condition, arm_true, arm_false } => {
-            let cond_var = visit_expr(condition, builder, &local_names, block);
+            let cond_var = visit_expr(&condition, builder, &local_names, block, exprs, type_by_expr);
 
             let first_block_true = builder.block();
             let succ_block = builder.block();
@@ -397,7 +412,7 @@ fn visit_item<'tcx>(
             let mut block_true = first_block_true;
             builder.set_terminator_of(first_block_true, Terminator::Jump(succ_block));
             for item in arm_true {
-                block_true = visit_item(item, arena, builder, local_names, ret, after_loop, block_true);
+                block_true = visit_item(item, arena, builder, local_names, ret, after_loop, block_true, exprs, type_by_expr);
             }
 
             let block_false = if let Some(items) = arm_false {
@@ -406,7 +421,7 @@ fn visit_item<'tcx>(
                 let mut block_false = first_block_false;
                 builder.set_terminator_of(block_false, Terminator::Jump(succ_block));
                 for item in items {
-                    block_false = visit_item(item, arena, builder, local_names, ret, after_loop, block_false);
+                    block_false = visit_item(item, arena, builder, local_names, ret, after_loop, block_false, exprs, type_by_expr);
                 }
 
                 first_block_false
@@ -418,18 +433,18 @@ fn visit_item<'tcx>(
             succ_block
         }
         Item::Return(expr) => {
-            let var = visit_expr(expr, builder, &local_names, block);
+            let var = visit_expr(&expr, builder, &local_names, block, exprs, type_by_expr);
             builder.push(block, Instr::Copy(ret.unwrap(), var));
             builder.set_terminator_of(block, Terminator::Return);
             block
         }
         Item::ForIn { name, expr, body } => {
-            match expr.ty {
+            match type_by_expr.of(expr) {
                 &Type::Array(len, item_ty) => {
                     let items_id = String::from("_items");
                     let index_id = String::from("_x");
 
-                    let expr_ty = expr.ty;
+                    let expr_ty = type_by_expr.of(expr);
                     let items = vec![
                         Item::Let {
                             name: items_id.clone(),
@@ -439,63 +454,68 @@ fn visit_item<'tcx>(
                         Item::Let {
                             name: index_id.clone(),
                             ty: arena.alloc(Type::I32),
-                            expr: Some(TypedExpression { ty: &Type::I32, expr: Expression::Integer(0) }),
+                            expr: Some(make_expr(exprs, type_by_expr, TypedExpression { ty: &Type::I32, expr: Expression::Integer(0) })),
                         },
                         Item::Loop {
                             body: {
+                                let expr = Expression::Infix(
+                                    ast::Operator::Equal,
+                                    make_expr(exprs, type_by_expr, TypedExpression { ty: &Type::I32, expr: Expression::Integer(len as i64) }),
+                                    make_expr(exprs, type_by_expr, TypedExpression { ty: &Type::I32, expr: Expression::Identifier(index_id.clone()) }),
+                                );
+
+                                let e = Expression::Index(
+                                    make_expr(exprs, type_by_expr, TypedExpression { ty: expr_ty, expr: Expression::Identifier(items_id) }),
+                                    make_expr(exprs, type_by_expr, TypedExpression { ty: &Type::U32, expr: Expression::Identifier(index_id.clone()) }),
+                                );
+
                                 let mut items = vec![
                                     Item::If {
-                                        condition: TypedExpression {
+                                        condition: make_expr(exprs, type_by_expr, TypedExpression {
                                             ty: &Type::Bool,
-                                            expr: Expression::Infix(
-                                                ast::Operator::Equal,
-                                                Box::new(TypedExpression { ty: &Type::I32, expr: Expression::Integer(len as i64) }),
-                                                Box::new(TypedExpression { ty: &Type::I32, expr: Expression::Identifier(index_id.clone()) }),
-                                            ),
-                                        },
+                                            expr,
+                                        }),
                                         arm_true: vec![Item::Break],
                                         arm_false: None,
                                     },
                                     Item::Let {
                                         name: name.to_string(),
                                         ty: item_ty,
-                                        expr: Some(TypedExpression {
+                                        expr: Some(make_expr(exprs, type_by_expr, TypedExpression {
                                             ty: item_ty,
-                                            expr: Expression::Index(
-                                                Box::new(TypedExpression { ty: expr_ty, expr: Expression::Identifier(items_id) }),
-                                                Box::new(TypedExpression { ty: &Type::U32, expr: Expression::Identifier(index_id.clone()) }),
-                                            ),
-                                        }),
+                                            expr: e,
+                                        })),
                                     },
                                 ];
                                 items.extend_from_slice(body);
+                                let e = Expression::Infix(
+                                    ast::Operator::Add,
+                                    make_expr(exprs, type_by_expr, TypedExpression { ty: &Type::I32, expr: Expression::Identifier(index_id.clone()) }),
+                                    make_expr(exprs, type_by_expr, TypedExpression { ty: &Type::I32, expr: Expression::Integer(1) }),
+                                );
                                 items.push(Item::Assignment {
-                                    lhs: TypedExpression { ty: &Type::I32, expr: Expression::Identifier(index_id.clone()) },
+                                    lhs: make_expr(exprs, type_by_expr, TypedExpression { ty: &Type::I32, expr: Expression::Identifier(index_id) }),
                                     operator: None,
-                                    expr: TypedExpression {
+                                    expr: make_expr(exprs, type_by_expr, TypedExpression {
                                         ty: &Type::I32,
-                                        expr: Expression::Infix(
-                                            ast::Operator::Add,
-                                            Box::new(TypedExpression { ty: &Type::I32, expr: Expression::Identifier(index_id) }),
-                                            Box::new(TypedExpression { ty: &Type::I32, expr: Expression::Integer(1) }),
-                                        ),
-                                    },
+                                        expr: e,
+                                    }),
                                 });
                                 items
                             }
                         },
                     ];
 
-                    visit_item(&Item::Block(items), arena, builder, local_names, ret, None, block)
+                    visit_item(&Item::Block(items), arena, builder, local_names, ret, None, block, exprs, type_by_expr)
                 }
                 &Type::Range => {
-                    let Expression::Range(start_expr, end_expr) = &expr.expr else {
+                    let Expression::Range(start_expr, end_expr) = &expr else {
                         todo!();
                     };
                     let end_expr = end_expr.as_ref().unwrap();
 
-                    let start = visit_expr(start_expr, builder, local_names, block);
-                    let end = visit_expr(end_expr, builder, local_names, block);
+                    let start = visit_expr(&start_expr, builder, local_names, block, exprs, type_by_expr);
+                    let end = visit_expr(&end_expr, builder, local_names, block, exprs, type_by_expr);
 
                     let index = name.clone();
 
@@ -503,43 +523,45 @@ fn visit_item<'tcx>(
                         Item::Let {
                             name: index.clone(),
                             ty: &Type::I32,
-                            expr: Some(TypedExpression { ty: &Type::I32, expr: Expression::Integer(0) }),
+                            expr: Some(make_expr(exprs, type_by_expr, TypedExpression { ty: &Type::I32, expr: Expression::Integer(0) })),
                         },
                         Item::Loop {
                             body: {
+                                let e = Expression::Infix(
+                                    ast::Operator::Equal,
+                                    make_expr(exprs, type_by_expr, TypedExpression { ty: &Type::I32, expr: Expression::Identifier(index.clone()) }),
+                                    make_expr(exprs, type_by_expr, TypedExpression { ty: &Type::I32, expr: Expression::Var(end) }),
+                                );
                                 let mut items = vec![
                                     Item::If {
-                                        condition: TypedExpression {
+                                        condition: make_expr(exprs, type_by_expr, TypedExpression {
                                             ty: &Type::Bool,
-                                            expr: Expression::Infix(
-                                                ast::Operator::Equal,
-                                                Box::new(TypedExpression { ty: &Type::I32, expr: Expression::Identifier(index.clone()) }),
-                                                Box::new(TypedExpression { ty: &Type::I32, expr: Expression::Var(end) }),
-                                            ),
-                                        },
+                                            expr: e,
+                                        }),
                                         arm_true: vec![Item::Break],
                                         arm_false: None,
                                     },
                                 ];
                                 items.extend_from_slice(body);
+                                let e = Expression::Infix(
+                                    ast::Operator::Add,
+                                    make_expr(exprs, type_by_expr, TypedExpression { ty: &Type::I32, expr: Expression::Identifier(index.clone()) }),
+                                    make_expr(exprs, type_by_expr, TypedExpression { ty: &Type::I32, expr: Expression::Integer(1) }),
+                                );
                                 items.push(Item::Assignment {
-                                    lhs: TypedExpression { ty: &Type::I32, expr: Expression::Identifier(index.clone()) },
+                                    lhs: make_expr(exprs, type_by_expr, TypedExpression { ty: &Type::I32, expr: Expression::Identifier(index) }),
                                     operator: None,
-                                    expr: TypedExpression {
+                                    expr: make_expr(exprs, type_by_expr, TypedExpression {
                                         ty: &Type::I32,
-                                        expr: Expression::Infix(
-                                            ast::Operator::Add,
-                                            Box::new(TypedExpression { ty: &Type::I32, expr: Expression::Identifier(index) }),
-                                            Box::new(TypedExpression { ty: &Type::I32, expr: Expression::Integer(1) }),
-                                        ),
-                                    },
+                                        expr: e,
+                                    }),
                                 });
                                 items
                             }
                         },
                     ];
 
-                    visit_item(&Item::Block(items), arena, builder, local_names, ret, None, block)
+                    visit_item(&Item::Block(items), arena, builder, local_names, ret, None, block, exprs, type_by_expr)
                 }
                 other => {
                     log::error!("Unsupported {:?}", other);
@@ -564,7 +586,7 @@ fn visit_item<'tcx>(
                     Item::Yield(_) => {}
                     Item::Return(_) => {}
                     other => {
-                        current = visit_item(other, arena, builder, local_names, ret, Some(after), current);
+                        current = visit_item(other, arena, builder, local_names, ret, Some(after), current, exprs, type_by_expr);
                         builder.set_terminator_of(current, Terminator::Jump(entry));
                     }
                 }
@@ -576,7 +598,7 @@ fn visit_item<'tcx>(
             // FIXME: build a new block?
             let mut block = block;
             for item in body {
-                block = visit_item(item, arena, builder, local_names, ret, after_loop, block);
+                block = visit_item(item, arena, builder, local_names, ret, after_loop, block, exprs, type_by_expr);
             }
             block
         }
@@ -590,7 +612,10 @@ fn visit_item<'tcx>(
     }
 }
 
-pub(crate) fn build_ir<'tcx>(item: &Item<'tcx>, arena: &'tcx Arena<Type<'tcx>>) -> Result<FunctionIr<'tcx>, ()> {
+pub(crate) fn build_ir<'expr, 'tcx>(item: &Item<'expr, 'tcx>, arena: &'tcx Arena<Type<'tcx>>,
+                             exprs: &'expr Arena<Expression<'expr, 'tcx>>,
+                             type_by_expr: &mut ExprToType<'tcx>,
+) -> Result<FunctionIr<'tcx>, ()> {
     let mut builder = IrBuilder::new();
     match item {
         Item::Function { name, is_extern, args, ty, body } if !is_extern => {
@@ -603,7 +628,7 @@ pub(crate) fn build_ir<'tcx>(item: &Item<'tcx>, arena: &'tcx Arena<Type<'tcx>>) 
 
             let mut block = builder.block();
             for item in body {
-                block = visit_item(item, arena, &mut builder, &mut names, Some(ret), None, block);
+                block = visit_item(item, arena, &mut builder, &mut names, Some(ret), None, block, exprs, type_by_expr);
             }
 
             return Ok(builder.build(name.to_owned()));

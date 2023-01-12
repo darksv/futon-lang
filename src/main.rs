@@ -7,6 +7,7 @@ extern crate core;
 use std::collections::HashMap;
 use std::env;
 use std::path::Path;
+use indexmap::IndexMap;
 
 use lexer::{Keyword, Lexer, PunctKind, Token, TokenType};
 use parser::Parser;
@@ -14,7 +15,7 @@ use parser::Parser;
 use crate::arena::Arena;
 use crate::ast::Operator;
 use crate::ir::{build_ir, Const, dump_ir, execute_ir};
-use crate::type_checking::{Expression, infer_types, Item, TypedExpression};
+use crate::type_checking::{Expression, ExprToType, infer_types, Item, TypedExpression};
 
 mod arena;
 mod ast;
@@ -63,14 +64,17 @@ fn compile_file(path: impl AsRef<Path>) -> bool {
             let mut locals = HashMap::new();
 
             let mut types = HashMap::new();
-            let items = infer_types(&mut items, &arena, &mut locals, None, &mut types);
+            let exprs = Arena::default();
+            let mut im = ExprToType::new();
+
+            let items = infer_types(&mut items, &arena, &mut locals, None, &mut types, &exprs, &mut im);
 
             let mut functions = HashMap::new();
             let mut asserts = Vec::new();
             for item in &items {
                 match item {
                     Item::Function { name, .. } => {
-                        let ir = build_ir(&item, &arena).unwrap();
+                        let ir = build_ir(&item, &arena, &exprs, &mut im).unwrap();
                         dump_ir(&ir, &mut std::io::stdout()).unwrap();
                         functions.insert(name.clone(), ir);
                     }
@@ -83,20 +87,20 @@ fn compile_file(path: impl AsRef<Path>) -> bool {
 
             let mut success = true;
             for assert in &asserts {
-                let Expression::Infix(Operator::Equal, lhs, rhs) = &assert.expr else {
+                let Expression::Infix(Operator::Equal, lhs, rhs) = assert else {
                     panic!("not a comparison");
                 };
 
-                let Expression::Call(fun, args) = &lhs.expr else {
+                let Expression::Call(fun, args) = lhs else {
                     panic!("not a call");
                 };
 
-                let Expression::Identifier(name) = &fun.expr else {
+                let Expression::Identifier(name) = fun else {
                     panic!("not a function call");
                 };
 
-                let expected = rhs.expr.as_const().unwrap();
-                let args: Vec<_> = args.iter().map(|it| it.expr.as_const().unwrap()).collect();
+                let expected = rhs.as_const().unwrap();
+                let args: Vec<_> = args.iter().map(|it| it.as_const().unwrap()).collect();
                 let actual = execute_ir(&functions[name], &args, &functions);
 
                 if expected != actual {
