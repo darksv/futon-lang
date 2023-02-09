@@ -135,7 +135,7 @@ impl<'a> Token<'a> {
     }
 
     /// Returns the char that is representing the token when it is a punctuation mark
-    pub fn get_punct(&self) -> Option<(char, PunctKind)> {
+    pub fn as_punct(&self) -> Option<(char, PunctKind)> {
         match self.value {
             TokenValue::Punct(ch, kind) => Some((ch, kind)),
             _ => None,
@@ -143,7 +143,7 @@ impl<'a> Token<'a> {
     }
 
     /// Returns the integral number when token is a integer literal
-    pub fn get_integer(&self) -> Option<i64> {
+    pub fn as_integer(&self) -> Option<i64> {
         match self.value {
             TokenValue::IntegralNumber(val) => Some(val),
             _ => None,
@@ -151,7 +151,7 @@ impl<'a> Token<'a> {
     }
 
     /// Returns the float number when token is a float literal
-    pub fn get_float(&self) -> Option<f64> {
+    pub fn as_float(&self) -> Option<f64> {
         match self.value {
             TokenValue::FloatingNumber(val) => Some(val),
             _ => None,

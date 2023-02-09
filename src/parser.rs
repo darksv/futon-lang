@@ -152,11 +152,11 @@ impl<'lex> Parser<'lex> {
             }
             TokenType::IntegralNumber => {
                 self.advance();
-                ast::Expression::Integer(token.get_integer().unwrap())
+                ast::Expression::Integer(token.as_integer().unwrap())
             }
             TokenType::FloatingNumber => {
                 self.advance();
-                ast::Expression::Float(token.get_float().unwrap())
+                ast::Expression::Float(token.as_float().unwrap())
             }
             TokenType::Keyword(Keyword::True) => {
                 self.advance();
@@ -234,7 +234,7 @@ impl<'lex> Parser<'lex> {
                 | TokenType::Punct('=') => {
                     let first = self.peek(0);
                     let second = self.peek(1);
-                    let is_joint = match first.get_punct() {
+                    let is_joint = match first.as_punct() {
                         Some((_, PunctKind::Joint)) => true,
                         _ => false,
                     };
@@ -273,7 +273,7 @@ impl<'lex> Parser<'lex> {
                     self.expect_one(')')?;
                     ast::Expression::Call(Box::new(expr), args)
                 }
-                TokenType::Punct('{') if let Some(('.' | '}', _)) = self.peek(1).get_punct() => {
+                TokenType::Punct('{') if let Some(('.' | '}', _)) = self.peek(1).as_punct() => {
                     self.advance();
                     let args = self.parse_comma_separated_field_exprs()?;
                     self.expect_one('}')?;
@@ -449,7 +449,7 @@ impl<'lex> Parser<'lex> {
                 let token = self.peek(0);
                 let length = match token.get_type() {
                     TokenType::IntegralNumber => {
-                        let length = token.get_integer().unwrap() as usize;
+                        let length = token.as_integer().unwrap() as usize;
                         self.advance();
                         Some(length)
                     }
@@ -617,7 +617,7 @@ impl<'lex> Parser<'lex> {
     #[inline]
     fn expect_many(&mut self, chars: &[char]) -> ParseResult<()> {
         for (idx, &expected) in chars.iter().enumerate() {
-            match self.peek(0).get_punct() {
+            match self.peek(0).as_punct() {
                 Some((actual, kind)) if actual == expected => {
                     if idx == chars.len() - 1 || kind == PunctKind::Joint {
                         self.advance();
@@ -634,7 +634,7 @@ impl<'lex> Parser<'lex> {
     #[inline]
     fn match_many(&mut self, chars: &[char]) -> bool {
         for (index, &expected) in chars.iter().enumerate() {
-            if let Some((actual, kind)) = self.peek(index).get_punct() {
+            if let Some((actual, kind)) = self.peek(index).as_punct() {
                 if actual != expected {
                     return false;
                 }
@@ -665,7 +665,7 @@ impl<'lex> Parser<'lex> {
 
     /// Consumes and returns next token only if it is a char given by argument
     fn match_punct(&mut self, kind: PunctKind, ch: char) -> bool {
-        if self.peek(0).get_punct() == Some((ch, kind)) {
+        if self.peek(0).as_punct() == Some((ch, kind)) {
             self.advance();
             return true;
         }
