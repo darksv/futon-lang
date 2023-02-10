@@ -14,8 +14,8 @@ use parser::Parser;
 
 use crate::arena::Arena;
 use crate::ast::Operator;
-use crate::ir::{build_ir, dump_ir, execute_ir, Const};
-use crate::type_checking::{infer_types, ExprToType, Expression, Item};
+use crate::ir::{build_ir, dump_ir, execute_ir, Const, validate_types};
+use crate::type_checking::{ExprToType, Expression, Item, TypeCheckerContext};
 
 mod arena;
 mod ast;
@@ -61,28 +61,24 @@ fn compile_file(path: impl AsRef<Path>) -> bool {
     let mut parser = Parser::new(lex);
     match parser.parse() {
         Ok(mut items) => {
-            let mut locals = HashMap::new();
 
-            let mut types = HashMap::new();
-            let exprs = Arena::default();
-            let mut im = ExprToType::new();
+            let mut tc_ctx = TypeCheckerContext {
+                arena: &arena,
+                locals: HashMap::new(),
+                defined_types: HashMap::new(),
+                exprs: &Arena::default(),
+                type_by_expr: ExprToType::new(),
+            };
 
-            let items = infer_types(
-                &mut items,
-                &arena,
-                &mut locals,
-                None,
-                &mut types,
-                &exprs,
-                &mut im,
-            );
+            let items = tc_ctx.infer_types(&mut items, None);
 
             let mut functions = HashMap::new();
             let mut asserts = Vec::new();
             for item in &items {
                 match item {
                     Item::Function { name, .. } => {
-                        let ir = build_ir(&item, &arena, &exprs, &mut im).unwrap();
+                        let ir = build_ir(&item, &arena, &tc_ctx.exprs, &mut tc_ctx.type_by_expr).unwrap();
+                        validate_types(&ir);
                         dump_ir(&ir, &mut std::io::stdout()).unwrap();
                         functions.insert(name.clone(), ir);
                     }

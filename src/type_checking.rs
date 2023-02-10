@@ -209,583 +209,521 @@ impl<'tcx> ExprToType<'tcx> {
     }
 }
 
-pub(crate) fn make_expr<'expr, 'tcx>(
-    exprs: &'expr Arena<Expression<'expr>>,
-    type_by_expr: &mut ExprToType<'tcx>,
-    ty: TypeRef<'tcx>,
-    expr: Expression<'expr>,
-) -> ExprRef<'expr> {
-    let expr = exprs.alloc(expr);
-    type_by_expr.insert(expr, ty);
-    expr
+
+pub(crate) struct TypeCheckerContext<'tcx, 'expr, 'ast> {
+    pub(crate) arena: &'tcx Arena<Type<'tcx>>,
+    pub(crate) locals: HashMap<&'ast str, TypeRef<'tcx>>,
+    pub(crate) defined_types: HashMap<&'expr str, TypeRef<'tcx>>,
+    pub(crate) exprs: &'expr Arena<Expression<'expr>>,
+    pub(crate) type_by_expr: ExprToType<'tcx>,
 }
 
-fn deduce_expr_ty<'tcx, 'expr>(
-    expr: &ast::Expression,
-    arena: &'tcx Arena<Type<'tcx>>,
-    locals: &HashMap<&str, TypeRef<'tcx>>,
-    defined_types: &HashMap<&str, TypeRef<'tcx>>,
-    exprs: &'expr Arena<Expression<'expr>>,
-    type_by_expr: &mut ExprToType<'tcx>,
-) -> ExprRef<'expr> {
-    let (expr, ty) = match expr {
-        ast::Expression::Bool(val) => (Expression::Bool(*val), arena.alloc(Type::Bool)),
-        ast::Expression::Integer(val) => (
-            // FIXME: type
-            Expression::Integer((*val as i32).into()),
-            arena.alloc(Type::Integer)
-        ),
-        ast::Expression::Float(val) => (Expression::Float(*val), arena.alloc(Type::Float)),
-        ast::Expression::Infix(op, lhs, rhs) => {
-            let lhs = deduce_expr_ty(lhs, arena, &locals, defined_types, exprs, type_by_expr);
-            let rhs = deduce_expr_ty(rhs, arena, &locals, defined_types, exprs, type_by_expr);
-            let ty = if is_compatible_to(type_by_expr.of(lhs), type_by_expr.of(rhs)) ||
-                type_by_expr.try_coerce_any(lhs, rhs)
-            {
-                match op {
-                    ast::Operator::Less
-                    | ast::Operator::LessEqual
-                    | ast::Operator::Greater
-                    | ast::Operator::GreaterEqual
-                    | ast::Operator::Equal
-                    | ast::Operator::NotEqual => arena.alloc(Type::Bool),
-                    ast::Operator::Add
-                    | ast::Operator::Sub
-                    | ast::Operator::Mul
-                    | ast::Operator::Div => type_by_expr.of(lhs),
-                    ast::Operator::Negate => unimplemented!(),
-                    ast::Operator::Ref => unimplemented!(),
-                    ast::Operator::Deref => unimplemented!(),
-                    ast::Operator::As => unimplemented!(),
-                }
-            } else {
-                log::debug!(
-                    "mismatched types {:?} and {:?}",
-                    type_by_expr.of(lhs),
-                    type_by_expr.of(rhs)
-                );
-                arena.alloc(Type::Error)
-            };
+impl<'ast, 'tcx, 'expr> TypeCheckerContext<'tcx, 'expr, 'ast>
+    where 'ast: 'expr
+{
+    pub(crate) fn make_expr(
+        &mut self,
+        ty: TypeRef<'tcx>,
+        expr: Expression<'expr>,
+    ) -> ExprRef<'expr> {
+        let expr = self.exprs.alloc(expr);
+        self.type_by_expr.insert(expr, ty);
+        expr
+    }
 
-            (Expression::Infix(*op, lhs, rhs), ty)
-        }
-        ast::Expression::Prefix(op, expr) => {
-            let inner = deduce_expr_ty(expr, arena, &locals, defined_types, exprs, type_by_expr);
-            let ty = match op {
-                ast::Operator::Ref => arena.alloc(Type::Pointer(type_by_expr.of(inner))),
-                ast::Operator::Deref => match type_by_expr.of(inner) {
-                    Type::Pointer(inner) => inner,
-                    _ => unimplemented!(),
-                },
-                _ => type_by_expr.of(inner),
-            };
-            (Expression::Prefix(*op, inner), ty)
-        }
-        ast::Expression::Identifier(ident) => {
-            let ty = if let Some(ty) = locals.get(ident.as_str()) {
-                ty
-            } else {
-                log::debug!("no local {:?}", ident);
-                arena.alloc(Type::Error)
-            };
-            (Expression::Identifier(ident.to_string()), ty)
-        }
-        ast::Expression::Place(expr, field) => {
-            let lhs = deduce_expr_ty(expr, arena, &locals, defined_types, exprs, type_by_expr);
-
-            let Some(name) = field.as_str() else {
-                unimplemented!()
-            };
-
-            let (idx, (_, ty)) = match &type_by_expr.of(lhs) {
-                Type::Struct { fields } => fields
-                    .iter()
-                    .enumerate()
-                    .find(|(idx, (n, _))| n == name)
-                    .unwrap(),
-                _ => unimplemented!(),
-            };
-
-            (Expression::Field(lhs, idx), *ty)
-        }
-        ast::Expression::Array(items) => {
-            if items.is_empty() {
-                return make_expr(
-                    exprs,
-                    type_by_expr,
-                    arena.alloc(Type::Unknown),
-                    Expression::Error,
-                );
-            }
-
-            let mut values = Vec::new();
-
-            let first =
-                deduce_expr_ty(&items[0], arena, locals, defined_types, exprs, type_by_expr);
-            let item_ty = type_by_expr.of(first);
-            values.push(first);
-
-            for next in items.iter().skip(1) {
-                let expr = deduce_expr_ty(next, arena, locals, defined_types, exprs, type_by_expr);
-                if is_compatible_to(type_by_expr.of(expr), item_ty) ||
-                    type_by_expr.try_coerce_any(expr, first) {
-                    //
+    fn deduce_expr_ty(&mut self, expr: &ast::Expression) -> ExprRef<'expr> {
+        let (expr, ty) = match expr {
+            ast::Expression::Bool(val) => (Expression::Bool(*val), self.arena.alloc(Type::Bool)),
+            ast::Expression::Integer(val) => (
+                // FIXME: type
+                Expression::Integer((*val as i32).into()),
+                self.arena.alloc(Type::Integer)
+            ),
+            ast::Expression::Float(val) => (Expression::Float(*val), self.arena.alloc(Type::Float)),
+            ast::Expression::Infix(op, lhs, rhs) => {
+                let lhs = self.deduce_expr_ty(lhs);
+                let rhs = self.deduce_expr_ty(rhs);
+                let ty = if is_compatible_to(self.type_by_expr.of(lhs), self.type_by_expr.of(rhs)) ||
+                    self.type_by_expr.try_coerce_any(lhs, rhs)
+                {
+                    match op {
+                        ast::Operator::Less
+                        | ast::Operator::LessEqual
+                        | ast::Operator::Greater
+                        | ast::Operator::GreaterEqual
+                        | ast::Operator::Equal
+                        | ast::Operator::NotEqual => self.arena.alloc(Type::Bool),
+                        ast::Operator::Add
+                        | ast::Operator::Sub
+                        | ast::Operator::Mul
+                        | ast::Operator::Div => self.type_by_expr.of(lhs),
+                        ast::Operator::Negate => unimplemented!(),
+                        ast::Operator::Ref => unimplemented!(),
+                        ast::Operator::Deref => unimplemented!(),
+                        ast::Operator::As => unimplemented!(),
+                    }
                 } else {
-                    log::debug!("incompatible types: {:?} and {:?}", type_by_expr.of(expr), item_ty);
-                    return make_expr(
-                        exprs,
-                        type_by_expr,
-                        arena.alloc(Type::Error),
+                    log::debug!(
+                    "mismatched types {:?} and {:?}",
+                    self.type_by_expr.of(lhs),
+                    self.type_by_expr.of(rhs)
+                );
+                    self.arena.alloc(Type::Error)
+                };
+
+                (Expression::Infix(*op, lhs, rhs), ty)
+            }
+            ast::Expression::Prefix(op, expr) => {
+                let inner = self.deduce_expr_ty(expr);
+                let ty = match op {
+                    ast::Operator::Ref => self.arena.alloc(Type::Pointer(self.type_by_expr.of(inner))),
+                    ast::Operator::Deref => match self.type_by_expr.of(inner) {
+                        Type::Pointer(inner) => inner,
+                        _ => unimplemented!(),
+                    },
+                    _ => self.type_by_expr.of(inner),
+                };
+                (Expression::Prefix(*op, inner), ty)
+            }
+            ast::Expression::Identifier(ident) => {
+                let ty = if let Some(ty) = self.locals.get(ident.as_str()) {
+                    ty
+                } else {
+                    log::debug!("no local {:?}", ident);
+                    self.arena.alloc(Type::Error)
+                };
+                (Expression::Identifier(ident.to_string()), ty)
+            }
+            ast::Expression::Place(expr, field) => {
+                let lhs = self.deduce_expr_ty(expr);
+
+                let Some(name) = field.as_str() else {
+                    unimplemented!()
+                };
+
+                let (idx, (_, ty)) = match &self.type_by_expr.of(lhs) {
+                    Type::Struct { fields } => fields
+                        .iter()
+                        .enumerate()
+                        .find(|(idx, (n, _))| n == name)
+                        .unwrap(),
+                    _ => unimplemented!(),
+                };
+
+                (Expression::Field(lhs, idx), *ty)
+            }
+            ast::Expression::Array(items) => {
+                if items.is_empty() {
+                    return self.make_expr(
+                        self.arena.alloc(Type::Unknown),
                         Expression::Error,
                     );
                 }
-                values.push(expr);
-            }
-
-            (
-                Expression::Array(values),
-                arena.alloc(Type::Array(items.len(), item_ty)),
-            )
-        }
-        ast::Expression::Call(callee, args) => match callee.as_ref() {
-            ast::Expression::Identifier(ident) => {
-                let callee = match ident.as_str() {
-                    "debug" => {
-                        let ty = arena.alloc(Type::Function(vec![&Type::Any], &Type::Any));
-                        make_expr(
-                            exprs,
-                            type_by_expr,
-                            ty,
-                            Expression::Intrinsic(Intrinsic::debug),
-                        )
-                    }
-                    other => {
-                        let ty = locals
-                            .get(other)
-                            .unwrap_or_else(|| panic!("a type for {}", other));
-                        deduce_expr_ty(callee, arena, locals, defined_types, exprs, type_by_expr)
-                    }
-                };
-
-                let (args_ty, ret_ty) = match type_by_expr.of(callee) {
-                    Type::Function(args_ty, ret_ty) => (args_ty, ret_ty),
-                    _ => {
-                        log::debug!("{} is not callable", ident.as_str());
-                        return make_expr(
-                            exprs,
-                            type_by_expr,
-                            arena.alloc(Type::Error),
-                            Expression::Error,
-                        );
-                    }
-                };
 
                 let mut values = Vec::new();
 
-                for (arg, expected_ty) in args.iter().zip(args_ty) {
-                    let arg =
-                        deduce_expr_ty(arg, arena, locals, defined_types, exprs, type_by_expr);
+                let first =
+                    self.deduce_expr_ty(&items[0]);
+                let item_ty = self.type_by_expr.of(first);
+                values.push(first);
 
-                    if is_compatible_to(type_by_expr.of(arg), expected_ty) ||
-                        type_by_expr.try_coerce(arg, expected_ty) {
+                for next in items.iter().skip(1) {
+                    let expr = self.deduce_expr_ty(next);
+                    if is_compatible_to(self.type_by_expr.of(expr), item_ty) ||
+                        self.type_by_expr.try_coerce_any(expr, first) {
                         //
                     } else {
-                        log::debug!(
-                            "incompatible types {:?} and {:?}",
-                            type_by_expr.of(arg),
-                            expected_ty
-                        );
-                        return make_expr(
-                            exprs,
-                            type_by_expr,
-                            arena.alloc(Type::Error),
+                        log::debug!("incompatible types: {:?} and {:?}", self.type_by_expr.of(expr), item_ty);
+                        return self.make_expr(
+                            self.arena.alloc(Type::Error),
                             Expression::Error,
                         );
                     }
-
-                    values.push(arg);
+                    values.push(expr);
                 }
 
-                (Expression::Call(callee, values), *ret_ty)
+                (
+                    Expression::Array(values),
+                    self.arena.alloc(Type::Array(items.len(), item_ty)),
+                )
             }
-            expr => unimplemented!("{:?}", expr),
-        },
-        ast::Expression::Range(from, Some(to)) => {
-            let from = deduce_expr_ty(from, arena, locals, defined_types, exprs, type_by_expr);
-            let to = deduce_expr_ty(to, arena, locals, defined_types, exprs, type_by_expr);
-            if is_compatible_to(type_by_expr.of(from), type_by_expr.of(to))
-                || type_by_expr.try_coerce_any(from, to) {
-                //
-            } else {
-                log::debug!("incompatible range bounds");
-                return make_expr(
-                    exprs,
-                    type_by_expr,
-                    arena.alloc(Type::Error),
-                    Expression::Error,
-                );
-            }
-            (Expression::Range(from, Some(to)), arena.alloc(Type::Range))
-        }
-        ast::Expression::Range(to, None) => {
-            unimplemented!()
-        }
-        ast::Expression::Tuple(items) => {
-            let mut values = Vec::new();
-            let mut types = Vec::new();
-
-            for value in items {
-                let expr = deduce_expr_ty(value, arena, locals, defined_types, exprs, type_by_expr);
-                types.push(type_by_expr.of(expr));
-                values.push(expr);
-            }
-
-            (Expression::Tuple(values), arena.alloc(Type::Tuple(types)))
-        }
-        ast::Expression::Index(array_expr, index_expr) => {
-            let array = deduce_expr_ty(array_expr, arena, locals, defined_types, exprs, type_by_expr);
-            let index = deduce_expr_ty(
-                index_expr,
-                arena,
-                locals,
-                defined_types,
-                exprs,
-                type_by_expr,
-            );
-
-            let ty = match (type_by_expr.of(array), type_by_expr.of(index)) {
-                (Type::Array(_, item_ty), idx)
-                | (Type::Slice(item_ty), idx) => {
-                    type_by_expr.try_coerce(array, &Type::I32);
-                    idx
-                }
-                _ => arena.alloc(Type::Error),
-            };
-
-            (Expression::Index(array, index), ty)
-        }
-        ast::Expression::Var(_) => unreachable!(),
-        ast::Expression::Cast(expr, ty) => {
-            let expr = deduce_expr_ty(expr, arena, locals, defined_types, exprs, type_by_expr);
-            let target_ty = unify(ty, arena, defined_types);
-            (Expression::Cast(expr), target_ty)
-        }
-        ast::Expression::StructLiteral(expr, fields) => {
-            let ty = match expr {
-                Some(name) => defined_types[name.as_str()],
-                None => &Type::Unknown,
-            };
-
-            let fields = fields
-                .iter()
-                .map(|(name, expr)| {
-                    deduce_expr_ty(expr, arena, locals, defined_types, exprs, type_by_expr)
-                })
-                .collect();
-            (Expression::StructLiteral(fields), ty)
-        }
-    };
-    make_expr(exprs, type_by_expr, ty, expr)
-}
-
-pub(crate) fn infer_types<'ast, 'tcx: 'ast, 'expr>(
-    items: &'ast [ast::Item],
-    arena: &'tcx Arena<Type<'tcx>>,
-    locals: &mut HashMap<&'ast str, TypeRef<'tcx>>,
-    expected_ret_ty: Option<TypeRef<'tcx>>,
-    defined_types: &mut HashMap<&'ast str, TypeRef<'tcx>>,
-    exprs: &'expr Arena<Expression<'expr>>,
-    type_by_expr: &mut ExprToType<'tcx>,
-) -> Vec<Item<'expr, 'tcx>> {
-    let mut lowered_items = Vec::new();
-
-    for item in items.iter() {
-        let item = match item {
-            ast::Item::Let {
-                name,
-                r#type: expected_ty,
-                expr,
-            } => {
-                if expr.is_none() {
-                    log::debug!("no expression on the right hand side of the let binding");
-                    continue;
-                }
-                let expr = deduce_expr_ty(
-                    expr.as_ref().unwrap(),
-                    arena,
-                    &locals,
-                    defined_types,
-                    exprs,
-                    type_by_expr,
-                );
-                log::debug!("deduced type {:?} for binding {}", expr, name);
-                let ty = match expected_ty {
-                    Some(expected) => {
-                        let target_ty = unify(expected, arena, defined_types);
-                        let source_ty = type_by_expr.of(expr);
-                        if is_compatible_to(target_ty, source_ty) ||
-                            type_by_expr.try_coerce(expr, target_ty) {
-                            target_ty
-                        } else {
-                            log::debug!("mismatched types. expected {:?}, got {:?}", target_ty, source_ty);
-                            continue;
+            ast::Expression::Call(callee, args) => match callee.as_ref() {
+                ast::Expression::Identifier(ident) => {
+                    let callee = match ident.as_str() {
+                        "debug" => {
+                            let ty = self.arena.alloc(Type::Function(vec![&Type::Any], &Type::Any));
+                            self.make_expr(
+                                ty,
+                                Expression::Intrinsic(Intrinsic::debug),
+                            )
                         }
+                        other => {
+                            let ty = self.locals
+                                .get(other)
+                                .unwrap_or_else(|| panic!("a type for {}", other));
+                            self.deduce_expr_ty(callee)
+                        }
+                    };
+
+                    let (args_ty, ret_ty) = match self.type_by_expr.of(callee) {
+                        Type::Function(args_ty, ret_ty) => (args_ty, ret_ty),
+                        _ => {
+                            log::debug!("{} is not callable", ident.as_str());
+                            return self.make_expr(
+                                self.arena.alloc(Type::Error),
+                                Expression::Error,
+                            );
+                        }
+                    };
+
+                    let mut values = Vec::new();
+
+                    for (arg, expected_ty) in args.iter().zip(args_ty) {
+                        let arg =
+                            self.deduce_expr_ty(arg);
+
+                        if is_compatible_to(self.type_by_expr.of(arg), expected_ty) ||
+                            self.type_by_expr.try_coerce(arg, expected_ty) {
+                            //
+                        } else {
+                            log::debug!(
+                            "incompatible types {:?} and {:?}",
+                            self.type_by_expr.of(arg),
+                            expected_ty
+                        );
+                            return self.make_expr(
+                                self.arena.alloc(Type::Error),
+                                Expression::Error,
+                            );
+                        }
+
+                        values.push(arg);
                     }
-                    None => &type_by_expr.of(expr),
-                };
-                locals.insert(name, ty);
 
-                Item::Let {
-                    name: name.clone(),
-                    ty,
-                    expr: Some(expr),
+                    (Expression::Call(callee, values), *ret_ty)
                 }
-            }
-            ast::Item::Assignment {
-                lhs,
-                operator,
-                expr,
-            } => {
-                let lhs = deduce_expr_ty(lhs, arena, &locals, defined_types, exprs, type_by_expr);
-                let rhs = deduce_expr_ty(expr, arena, &locals, defined_types, exprs, type_by_expr);
-
-                if is_compatible_to(type_by_expr.of(lhs), type_by_expr.of(rhs)) ||
-                    type_by_expr.try_coerce_any(lhs, rhs) {
+                expr => unimplemented!("{:?}", expr),
+            },
+            ast::Expression::Range(from, Some(to)) => {
+                let from = self.deduce_expr_ty(from);
+                let to = self.deduce_expr_ty(to);
+                if is_compatible_to(self.type_by_expr.of(from), self.type_by_expr.of(to))
+                    || self.type_by_expr.try_coerce_any(from, to) {
                     //
                 } else {
-                    log::debug!(
-                        "incompatible types in assignment, got {:?} and {:?}",
-                        type_by_expr.of(lhs),
-                        type_by_expr.of(rhs)
+                    log::debug!("incompatible range bounds");
+                    return self.make_expr(
+                        self.arena.alloc(Type::Error),
+                        Expression::Error,
                     );
-                    continue;
+                }
+                (Expression::Range(from, Some(to)), self.arena.alloc(Type::Range))
+            }
+            ast::Expression::Range(to, None) => {
+                unimplemented!()
+            }
+            ast::Expression::Tuple(items) => {
+                let mut values = Vec::new();
+                let mut types = Vec::new();
+
+                for value in items {
+                    let expr = self.deduce_expr_ty(value);
+                    types.push(self.type_by_expr.of(expr));
+                    values.push(expr);
                 }
 
-                Item::Assignment {
-                    lhs,
-                    operator: *operator,
-                    expr: rhs,
-                }
+                (Expression::Tuple(values), self.arena.alloc(Type::Tuple(types)))
             }
-            ast::Item::Expr { expr } => {
-                let expr = deduce_expr_ty(expr, arena, locals, defined_types, exprs, type_by_expr);
-                Item::Expression { expr }
-            }
-            ast::Item::Function {
-                name,
-                params,
-                ty,
-                body,
-                ..
-            } => {
-                let mut args = Vec::new();
-                for param in params {
-                    let ty = unify(&param.r#type, arena, defined_types);
-                    log::debug!("Found arg {} of type {:?}", &param.name, ty);
-                    locals.insert(
-                        param.name.as_str(),
-                        unify(&param.r#type, arena, defined_types),
-                    );
-                    args.push(ty);
-                }
+            ast::Expression::Index(array_expr, index_expr) => {
+                let array = self.deduce_expr_ty(array_expr);
+                let index = self.deduce_expr_ty(index_expr);
 
-                let func_ty = Type::Function(args, unify(ty, arena, defined_types));
-                let func_ty = arena.alloc(func_ty);
-                locals.insert(name.as_str(), func_ty);
+                let ty = match (self.type_by_expr.of(array), self.type_by_expr.of(index)) {
+                    (Type::Array(_, item_ty), idx)
+                    | (Type::Slice(item_ty), idx) => {
+                        self.type_by_expr.try_coerce(array, &Type::I32);
+                        idx
+                    }
+                    _ => self.arena.alloc(Type::Error),
+                };
 
-                let body = infer_types(
-                    body,
-                    arena,
-                    locals,
-                    Some(unify(ty, arena, defined_types)),
-                    defined_types,
-                    exprs,
-                    type_by_expr,
-                );
-                Item::Function {
-                    name: name.clone(),
-                    is_extern: false,
-                    args: params
-                        .iter()
-                        .map(|it| Argument {
-                            name: it.name.clone(),
-                            ty: unify(&it.r#type, arena, defined_types),
-                        })
-                        .collect(),
-                    ty: unify(ty, arena, defined_types),
-                    body,
-                }
+                (Expression::Index(array, index), ty)
             }
-            ast::Item::Struct { name, fields } => {
-                let fields: Vec<_> = fields
+            ast::Expression::Var(_) => unreachable!(),
+            ast::Expression::Cast(expr, ty) => {
+                let expr = self.deduce_expr_ty(expr);
+                let target_ty = self.unify(ty);
+                (Expression::Cast(expr), target_ty)
+            }
+            ast::Expression::StructLiteral(expr, fields) => {
+                let ty = match expr {
+                    Some(name) => self.defined_types[name.as_str()],
+                    None => &Type::Unknown,
+                };
+
+                let fields = fields
                     .iter()
-                    .map(|field| {
-                        (
-                            field.name.clone(),
-                            unify(&field.r#type, arena, defined_types),
-                        )
+                    .map(|(name, expr)| {
+                        self.deduce_expr_ty(expr)
                     })
                     .collect();
-                defined_types.insert(name, arena.alloc(Type::Struct { fields }));
-                continue;
+                (Expression::StructLiteral(fields), ty)
             }
-            ast::Item::If {
-                condition,
-                arm_true,
-                arm_false,
-            } => {
-                let cond = deduce_expr_ty(
-                    condition,
-                    arena,
-                    &locals,
-                    defined_types,
-                    exprs,
-                    type_by_expr,
-                );
-                if !is_compatible_to(type_by_expr.of(cond), arena.alloc(Type::Bool)) {
-                    log::debug!("only boolean expressions are allowed in if conditions, got {:?}", type_by_expr.of(cond));
-                    continue;
-                }
-                Item::If {
-                    condition: cond,
-                    arm_true: infer_types(
-                        arm_true,
-                        arena,
-                        locals,
-                        expected_ret_ty,
-                        defined_types,
-                        exprs,
-                        type_by_expr,
-                    ),
-                    arm_false: if let Some(arm_false) = arm_false {
-                        Some(infer_types(
-                            arm_false,
-                            arena,
-                            locals,
-                            expected_ret_ty,
-                            defined_types,
-                            exprs,
-                            type_by_expr,
-                        ))
-                    } else {
-                        None
-                    },
-                }
-            }
-            ast::Item::ForIn { name, expr, body } => {
-                let expr = deduce_expr_ty(expr, arena, locals, defined_types, exprs, type_by_expr);
-                let is_iterable = match type_by_expr.of(expr) {
-                    Type::Array(_, _) | Type::Slice(_) => true,
-                    Type::Range => true,
-                    _ => false,
-                };
-                if !is_iterable {
-                    log::debug!("{:?} is not iterable", type_by_expr.of(expr));
-                    continue;
-                }
-                locals.insert(name.as_str(), arena.alloc(Type::I32));
-                let body = infer_types(
-                    body,
-                    arena,
-                    locals,
-                    expected_ret_ty,
-                    defined_types,
-                    exprs,
-                    type_by_expr,
-                );
-                Item::ForIn {
-                    name: name.clone(),
+        };
+        self.make_expr(ty, expr)
+    }
+
+    pub(crate) fn infer_types(
+        &mut self,
+        items: &'ast [ast::Item],
+        expected_ret_ty: Option<TypeRef<'tcx>>,
+    ) -> Vec<Item<'expr, 'tcx>>  {
+        let mut lowered_items = Vec::new();
+
+        for item in items.iter() {
+            let item = match item {
+                ast::Item::Let {
+                    name,
+                    r#type: expected_ty,
                     expr,
-                    body,
+                } => {
+                    if expr.is_none() {
+                        log::debug!("no expression on the right hand side of the let binding");
+                        continue;
+                    }
+                    let expr = self.deduce_expr_ty(
+                        expr.as_ref().unwrap(),
+                    );
+                    log::debug!("deduced type {:?} for binding {}", expr, name);
+                    let ty = match expected_ty {
+                        Some(expected) => {
+                            let target_ty = self.unify(expected);
+                            let source_ty = self.type_by_expr.of(expr);
+                            if is_compatible_to(target_ty, source_ty) ||
+                                self.type_by_expr.try_coerce(expr, target_ty) {
+                                target_ty
+                            } else {
+                                log::debug!("mismatched types. expected {:?}, got {:?}", target_ty, source_ty);
+                                continue;
+                            }
+                        }
+                        None => &self.type_by_expr.of(expr),
+                    };
+                    self.locals.insert(name, ty);
+
+                    Item::Let {
+                        name: name.clone(),
+                        ty,
+                        expr: Some(expr),
+                    }
                 }
-            }
-            ast::Item::Loop { body } => Item::Loop {
-                body: infer_types(
-                    body,
-                    arena,
-                    locals,
-                    expected_ret_ty,
-                    defined_types,
-                    exprs,
-                    type_by_expr,
-                ),
-            },
-            ast::Item::Return(expr) => {
-                if expected_ret_ty.is_none() {
-                    panic!("return outside of a function");
+                ast::Item::Assignment {
+                    lhs,
+                    operator,
+                    expr,
+                } => {
+                    let lhs = self.deduce_expr_ty(lhs);
+                    let rhs = self.deduce_expr_ty(expr);
+
+                    if is_compatible_to(self.type_by_expr.of(lhs), self.type_by_expr.of(rhs)) ||
+                        self.type_by_expr.try_coerce_any(lhs, rhs) {
+                        //
+                    } else {
+                        log::debug!(
+                        "incompatible types in assignment, got {:?} and {:?}",
+                        self.type_by_expr.of(lhs),
+                        self.type_by_expr.of(rhs)
+                    );
+                        continue;
+                    }
+
+                    Item::Assignment {
+                        lhs,
+                        operator: *operator,
+                        expr: rhs,
+                    }
                 }
-                let expr = deduce_expr_ty(expr, arena, locals, defined_types, exprs, type_by_expr);
-                if is_compatible_to(type_by_expr.of(expr), expected_ret_ty.unwrap()) ||
-                    type_by_expr.try_coerce(expr, expected_ret_ty.unwrap()) {
-                    //
-                } else {
-                    log::debug!(
+                ast::Item::Expr { expr } => {
+                    let expr = self.deduce_expr_ty(expr);
+                    Item::Expression { expr }
+                }
+                ast::Item::Function {
+                    name,
+                    params,
+                    ty,
+                    body,
+                    ..
+                } => {
+                    let mut args = Vec::new();
+                    for param in params {
+                        let ty = self.unify(&param.r#type,);
+                        log::debug!("Found arg {} of type {:?}", &param.name, ty);
+                        self.locals.insert(
+                            param.name.as_str(),
+                            self.unify(&param.r#type),
+                        );
+                        args.push(ty);
+                    }
+
+                    let func_ty = Type::Function(args, self.unify(ty));
+                    let func_ty = self.arena.alloc(func_ty);
+                    self.locals.insert(name.as_str(), func_ty);
+
+                    let body = self.infer_types(
+                        body,
+                        Some(self.unify(ty)),
+                    );
+                    Item::Function {
+                        name: name.clone(),
+                        is_extern: false,
+                        args: params
+                            .iter()
+                            .map(|it| Argument {
+                                name: it.name.clone(),
+                                ty: self.unify(&it.r#type),
+                            })
+                            .collect(),
+                        ty: self.unify(ty),
+                        body,
+                    }
+                }
+                ast::Item::Struct { name, fields } => {
+                    let fields: Vec<_> = fields
+                        .iter()
+                        .map(|field| {
+                            (
+                                field.name.clone(),
+                                self.unify(&field.r#type),
+                            )
+                        })
+                        .collect();
+                    self.defined_types.insert(name, self.arena.alloc(Type::Struct { fields }));
+                    continue;
+                }
+                ast::Item::If {
+                    condition,
+                    arm_true,
+                    arm_false,
+                } => {
+                    let cond = self.deduce_expr_ty(
+                        condition,
+                    );
+                    if !is_compatible_to(self.type_by_expr.of(cond), self.arena.alloc(Type::Bool)) {
+                        log::debug!("only boolean expressions are allowed in if conditions, got {:?}", self.type_by_expr.of(cond));
+                        continue;
+                    }
+                    Item::If {
+                        condition: cond,
+                        arm_true: self.infer_types(
+                            arm_true,
+                            expected_ret_ty,
+                        ),
+                        arm_false: if let Some(arm_false) = arm_false {
+                            Some(self.infer_types(
+                                arm_false,
+                                expected_ret_ty,
+                            ))
+                        } else {
+                            None
+                        },
+                    }
+                }
+                ast::Item::ForIn { name, expr, body } => {
+                    let expr = self.deduce_expr_ty(expr);
+                    let is_iterable = match self.type_by_expr.of(expr) {
+                        Type::Array(_, _) | Type::Slice(_) => true,
+                        Type::Range => true,
+                        _ => false,
+                    };
+                    if !is_iterable {
+                        log::debug!("{:?} is not iterable", self.type_by_expr.of(expr));
+                        continue;
+                    }
+                    self.locals.insert(name.as_str(), self.arena.alloc(Type::I32));
+                    let body = self.infer_types(
+                        body,
+                        expected_ret_ty,
+                    );
+                    Item::ForIn {
+                        name: name.clone(),
+                        expr,
+                        body,
+                    }
+                }
+                ast::Item::Loop { body } => Item::Loop {
+                    body: self.infer_types(
+                        body,
+                        expected_ret_ty,
+                    ),
+                },
+                ast::Item::Return(expr) => {
+                    if expected_ret_ty.is_none() {
+                        panic!("return outside of a function");
+                    }
+                    let expr = self.deduce_expr_ty(expr);
+                    if is_compatible_to(self.type_by_expr.of(expr), expected_ret_ty.unwrap()) ||
+                        self.type_by_expr.try_coerce(expr, expected_ret_ty.unwrap()) {
+                        //
+                    } else {
+                        log::debug!(
                         "function marked as returning {:?} but returned {:?}",
                         expected_ret_ty.unwrap(),
                         expr
                     );
-                    continue;
+                        continue;
+                    }
+                    Item::Return(expr)
                 }
-                Item::Return(expr)
-            }
-            ast::Item::Break => Item::Break,
-            ast::Item::Yield(_) => unimplemented!(),
-            ast::Item::Block(body) => {
-                infer_types(
-                    body,
-                    arena,
-                    locals,
-                    expected_ret_ty,
-                    defined_types,
-                    exprs,
-                    type_by_expr,
-                );
-                todo!()
-            }
-            ast::Item::Assert(expr) => {
-                let expr = deduce_expr_ty(expr, arena, locals, defined_types, exprs, type_by_expr);
-                Item::Assert(expr)
-            }
-        };
+                ast::Item::Break => Item::Break,
+                ast::Item::Yield(_) => unimplemented!(),
+                ast::Item::Block(body) => {
+                    self.infer_types(
+                        body,
+                        expected_ret_ty,
+                    );
+                    todo!()
+                }
+                ast::Item::Assert(expr) => {
+                    let expr = self.deduce_expr_ty(expr);
+                    Item::Assert(expr)
+                }
+            };
 
-        lowered_items.push(item);
+            lowered_items.push(item);
+        }
+
+        lowered_items
     }
 
-    lowered_items
-}
-
-fn unify<'tcx>(
-    ty: &ast::Type,
-    arena: &'tcx Arena<Type<'tcx>>,
-    defined_types: &HashMap<&str, TypeRef<'tcx>>,
-) -> TypeRef<'tcx> {
-    match ty {
-        ast::Type::Name(name) => {
-            match name.as_str() {
-                "i32" => arena.alloc(Type::I32),
-                "u32" => arena.alloc(Type::U32),
-                "f32" => arena.alloc(Type::F32),
-                "bool" => arena.alloc(Type::Bool),
-                custom if let Some(ty) = defined_types.get(custom) => ty,
-                custom => {
-                    log::warn!("missing type for custom {:?}", custom);
-                    return &Type::Unknown;
+    fn unify(&self, ty: &ast::Type) -> TypeRef<'tcx> {
+        match ty {
+            ast::Type::Name(name) => {
+                match name.as_str() {
+                    "i32" => self.arena.alloc(Type::I32),
+                    "u32" => self.arena.alloc(Type::U32),
+                    "f32" => self.arena.alloc(Type::F32),
+                    "bool" => self.arena.alloc(Type::Bool),
+                    custom if let Some(ty) = self.defined_types.get(custom) => ty,
+                    custom => {
+                        log::warn!("missing type for custom {:?}", custom);
+                        return &Type::Unknown;
+                    }
                 }
             }
-        }
-        ast::Type::Tuple(types) => {
-            let types: Vec<_> = types.iter()
-                .map(|it| unify(it, arena, defined_types))
-                .collect();
-            arena.alloc(Type::Tuple(types))
-        }
-        ast::Type::Pointer(ty) => arena.alloc(Type::Pointer(unify(ty, arena, defined_types))),
-        ast::Type::Array(len, ty) => arena.alloc(Type::Array(*len, unify(ty, arena, defined_types))),
-        ast::Type::Slice(item_ty) => arena.alloc(Type::Slice(unify(item_ty, arena, defined_types))),
-        ast::Type::Unit => arena.alloc(Type::Unit),
-        ast::Type::Function(args_ty, ret_ty) => {
-            let args = args_ty.iter().map(|it| unify(it, arena, defined_types)).collect();
-            arena.alloc(Type::Function(args, unify(ret_ty, arena, defined_types)))
+            ast::Type::Tuple(types) => {
+                let types: Vec<_> = types.iter()
+                    .map(|it| self.unify(it))
+                    .collect();
+                self.arena.alloc(Type::Tuple(types))
+            }
+            ast::Type::Pointer(ty) => self.arena.alloc(Type::Pointer(self.unify(ty))),
+            ast::Type::Array(len, ty) => self.arena.alloc(Type::Array(*len, self.unify(ty))),
+            ast::Type::Slice(item_ty) => self.arena.alloc(Type::Slice(self.unify(item_ty))),
+            ast::Type::Unit => self.arena.alloc(Type::Unit),
+            ast::Type::Function(args_ty, ret_ty) => {
+                let args = args_ty.iter().map(|it| self.unify(it)).collect();
+                self.arena.alloc(Type::Function(args, self.unify(ret_ty)))
+            }
         }
     }
 }

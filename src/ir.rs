@@ -4,11 +4,22 @@ use std::collections::HashMap;
 use std::io::Write;
 
 use crate::{Arena, ast};
-use crate::type_checking::{Expression, ExprRef, ExprToType, Item, make_expr};
+use crate::type_checking::{Expression, ExprRef, ExprToType, Item};
 use crate::types::{Type, TypeRef};
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
 pub(crate) struct Var(usize);
+
+pub(crate) fn make_expr<'expr, 'tcx>(
+    exprs: &'expr Arena<Expression<'expr>>,
+    type_by_expr: &mut ExprToType<'tcx>,
+    ty: TypeRef<'tcx>,
+    expr: Expression<'expr>,
+) -> ExprRef<'expr> {
+    let expr = exprs.alloc(expr);
+    type_by_expr.insert(expr, ty);
+    expr
+}
 
 impl Var {
     fn error() -> Self {
@@ -266,6 +277,17 @@ pub(crate) struct FunctionIr<'tcx> {
     /// defines[num_args+1..] == locals
     defines: Vec<VarDef<'tcx>>,
     blocks: Vec<BlockBody>,
+}
+
+pub(crate) fn validate_types(ir: &FunctionIr<'_>) {
+    for x in &ir.defines {
+        match &x.ty {
+            Type::Integer | Type::Float => {
+                log::warn!("unexpected abstract type {:?} for {:?}", x.ty, &x.name);
+            }
+            _ => {}
+        }
+    }
 }
 
 pub(crate) fn dump_ir(ir: &FunctionIr<'_>, f: &mut impl Write) -> io::Result<()> {
