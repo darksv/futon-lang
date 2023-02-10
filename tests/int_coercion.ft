@@ -1,0 +1,8 @@
+fn foo() -> i32 {
+    let a: i32 = 123;
+    let b: u32 = 234;
+
+    return a + (b as i32);
+}
+
+assert foo() == 357;

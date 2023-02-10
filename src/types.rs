@@ -1,6 +1,8 @@
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Default)]
 pub(crate) enum Type<'tcx> {
     Bool,
+    Integer,
+    Float,
     U32,
     I32,
     F32,

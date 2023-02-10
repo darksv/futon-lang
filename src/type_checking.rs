@@ -4,8 +4,16 @@ use std::ptr::addr_of;
 
 use crate::arena::Arena;
 use crate::ast;
-use crate::ir::Var;
+use crate::ir::{Bits, Var};
 use crate::types::{Type, TypeRef};
+
+fn is_coercible_to(ty: TypeRef<'_>, target: TypeRef<'_>) -> bool {
+    match (ty, target) {
+        (Type::Integer, Type::I32 | Type::U32) => true,
+        (Type::Float, Type::F32) => true,
+        _ => false
+    }
+}
 
 fn is_compatible_to(ty: TypeRef<'_>, subty: TypeRef<'_>) -> bool {
     match (ty, subty) {
@@ -22,9 +30,9 @@ fn is_compatible_to(ty: TypeRef<'_>, subty: TypeRef<'_>) -> bool {
         (Type::Tuple(ty1), Type::Tuple(ty2)) => {
             ty1.len() == ty2.len()
                 && ty1
-                    .iter()
-                    .zip(ty2.iter())
-                    .all(|(ty1, ty2)| is_compatible_to(ty1, ty2))
+                .iter()
+                .zip(ty2.iter())
+                .all(|(ty1, ty2)| is_compatible_to(ty1, ty2))
         }
         (Type::Function(args1, ret1), Type::Function(args2, ret2)) => {
             if args1.len() != args2.len() {
@@ -78,7 +86,7 @@ pub(crate) type ExprRef<'expr> = &'expr Expression<'expr>;
 #[derive(Debug, Clone)]
 pub(crate) enum Expression<'expr> {
     Identifier(String),
-    Integer(i64),
+    Integer(Bits),
     Float(f64),
     Bool(bool),
     Infix(ast::Operator, ExprRef<'expr>, ExprRef<'expr>),
@@ -155,9 +163,41 @@ impl<'tcx> ExprToType<'tcx> {
         }
     }
 
+    fn try_insert(&mut self, expr: ExprRef<'_>, ty: TypeRef<'tcx>) -> Option<TypeRef<'tcx>> {
+        self.map.insert(addr_of!(*expr).cast(), ty)
+    }
+
     pub(crate) fn insert(&mut self, expr: ExprRef<'_>, ty: TypeRef<'tcx>) {
-        if let Some(old) = self.map.insert(addr_of!(*expr).cast(), ty) {
+        if let Some(old) = self.try_insert(expr, ty) {
             assert_eq!(old, ty, "type should not change");
+        }
+    }
+
+    fn try_coerce(&mut self, expr: ExprRef<'_>, ty: TypeRef<'tcx>) -> bool {
+        log::debug!("trying coercion of {:?} with type {:?} to {:?}", expr, self.of(expr), ty);
+        match self.of(expr) {
+            Type::Unknown => panic!("coercion failed??"),
+            other if is_coercible_to(other, ty) => {
+                self.try_insert(expr, ty);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub(crate) fn try_coerce_any(&mut self, lhs: ExprRef<'_>, rhs: ExprRef<'_>) -> bool {
+        if self.try_coerce(lhs, self.of(rhs)) ||
+            self.try_coerce(rhs, self.of(lhs)) {
+            return true;
+        }
+
+        match (self.of(lhs), self.of(rhs)) {
+            (Type::Integer, Type::Integer) => {
+                self.try_insert(lhs, &Type::I32);
+                self.try_insert(rhs, &Type::I32);
+                true
+            }
+            _ => false,
         }
     }
 
@@ -189,20 +229,19 @@ fn deduce_expr_ty<'tcx, 'expr>(
     type_by_expr: &mut ExprToType<'tcx>,
 ) -> ExprRef<'expr> {
     let (expr, ty) = match expr {
-        ast::Expression::Integer(val) => (Expression::Integer(*val), arena.alloc(Type::I32)),
-        ast::Expression::Float(val) => (Expression::Float(*val), arena.alloc(Type::F32)),
         ast::Expression::Bool(val) => (Expression::Bool(*val), arena.alloc(Type::Bool)),
+        ast::Expression::Integer(val) => (
+            // FIXME: type
+            Expression::Integer((*val as i32).into()),
+            arena.alloc(Type::Integer)
+        ),
+        ast::Expression::Float(val) => (Expression::Float(*val), arena.alloc(Type::Float)),
         ast::Expression::Infix(op, lhs, rhs) => {
             let lhs = deduce_expr_ty(lhs, arena, &locals, defined_types, exprs, type_by_expr);
             let rhs = deduce_expr_ty(rhs, arena, &locals, defined_types, exprs, type_by_expr);
-            let ty = if !is_compatible_to(type_by_expr.of(lhs), type_by_expr.of(rhs)) {
-                log::debug!(
-                    "mismatched types {:?} and {:?}",
-                    type_by_expr.of(lhs),
-                    type_by_expr.of(rhs)
-                );
-                arena.alloc(Type::Error)
-            } else {
+            let ty = if is_compatible_to(type_by_expr.of(lhs), type_by_expr.of(rhs)) ||
+                type_by_expr.try_coerce_any(lhs, rhs)
+            {
                 match op {
                     ast::Operator::Less
                     | ast::Operator::LessEqual
@@ -219,6 +258,13 @@ fn deduce_expr_ty<'tcx, 'expr>(
                     ast::Operator::Deref => unimplemented!(),
                     ast::Operator::As => unimplemented!(),
                 }
+            } else {
+                log::debug!(
+                    "mismatched types {:?} and {:?}",
+                    type_by_expr.of(lhs),
+                    type_by_expr.of(rhs)
+                );
+                arena.alloc(Type::Error)
             };
 
             (Expression::Infix(*op, lhs, rhs), ty)
@@ -281,8 +327,11 @@ fn deduce_expr_ty<'tcx, 'expr>(
 
             for next in items.iter().skip(1) {
                 let expr = deduce_expr_ty(next, arena, locals, defined_types, exprs, type_by_expr);
-                if !is_compatible_to(&type_by_expr.of(expr), item_ty) {
-                    log::debug!("incompatible types: {:?} and {:?}", expr, item_ty);
+                if is_compatible_to(type_by_expr.of(expr), item_ty) ||
+                    type_by_expr.try_coerce_any(expr, first) {
+                    //
+                } else {
+                    log::debug!("incompatible types: {:?} and {:?}", type_by_expr.of(expr), item_ty);
                     return make_expr(
                         exprs,
                         type_by_expr,
@@ -337,7 +386,10 @@ fn deduce_expr_ty<'tcx, 'expr>(
                     let arg =
                         deduce_expr_ty(arg, arena, locals, defined_types, exprs, type_by_expr);
 
-                    if !is_compatible_to(type_by_expr.of(arg), expected_ty) {
+                    if is_compatible_to(type_by_expr.of(arg), expected_ty) ||
+                        type_by_expr.try_coerce(arg, expected_ty) {
+                        //
+                    } else {
                         log::debug!(
                             "incompatible types {:?} and {:?}",
                             type_by_expr.of(arg),
@@ -361,7 +413,10 @@ fn deduce_expr_ty<'tcx, 'expr>(
         ast::Expression::Range(from, Some(to)) => {
             let from = deduce_expr_ty(from, arena, locals, defined_types, exprs, type_by_expr);
             let to = deduce_expr_ty(to, arena, locals, defined_types, exprs, type_by_expr);
-            if !is_compatible_to(type_by_expr.of(from), type_by_expr.of(to)) {
+            if is_compatible_to(type_by_expr.of(from), type_by_expr.of(to))
+                || type_by_expr.try_coerce_any(from, to) {
+                //
+            } else {
                 log::debug!("incompatible range bounds");
                 return make_expr(
                     exprs,
@@ -387,9 +442,9 @@ fn deduce_expr_ty<'tcx, 'expr>(
 
             (Expression::Tuple(values), arena.alloc(Type::Tuple(types)))
         }
-        ast::Expression::Index(arr, index_expr) => {
-            let lhs = deduce_expr_ty(arr, arena, locals, defined_types, exprs, type_by_expr);
-            let rhs = deduce_expr_ty(
+        ast::Expression::Index(array_expr, index_expr) => {
+            let array = deduce_expr_ty(array_expr, arena, locals, defined_types, exprs, type_by_expr);
+            let index = deduce_expr_ty(
                 index_expr,
                 arena,
                 locals,
@@ -398,13 +453,16 @@ fn deduce_expr_ty<'tcx, 'expr>(
                 type_by_expr,
             );
 
-            let ty = match (type_by_expr.of(lhs), type_by_expr.of(rhs)) {
-                (Type::Array(_, item_ty), Type::I32) => item_ty,
-                (Type::Slice(item_ty), Type::I32) => item_ty,
+            let ty = match (type_by_expr.of(array), type_by_expr.of(index)) {
+                (Type::Array(_, item_ty), idx)
+                | (Type::Slice(item_ty), idx) => {
+                    type_by_expr.try_coerce(array, &Type::I32);
+                    idx
+                }
                 _ => arena.alloc(Type::Error),
             };
 
-            (Expression::Index(lhs, rhs), ty)
+            (Expression::Index(array, index), ty)
         }
         ast::Expression::Var(_) => unreachable!(),
         ast::Expression::Cast(expr, ty) => {
@@ -463,12 +521,15 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast, 'expr>(
                 log::debug!("deduced type {:?} for binding {}", expr, name);
                 let ty = match expected_ty {
                     Some(expected) => {
-                        let ty = unify(expected, arena, defined_types);
-                        if !is_compatible_to(ty, &type_by_expr.of(expr)) {
-                            log::debug!("mismatched types. expected {:?}, got {:?}", ty, expr);
+                        let target_ty = unify(expected, arena, defined_types);
+                        let source_ty = type_by_expr.of(expr);
+                        if is_compatible_to(target_ty, source_ty) ||
+                            type_by_expr.try_coerce(expr, target_ty) {
+                            target_ty
+                        } else {
+                            log::debug!("mismatched types. expected {:?}, got {:?}", target_ty, source_ty);
                             continue;
                         }
-                        ty
                     }
                     None => &type_by_expr.of(expr),
                 };
@@ -488,7 +549,10 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast, 'expr>(
                 let lhs = deduce_expr_ty(lhs, arena, &locals, defined_types, exprs, type_by_expr);
                 let rhs = deduce_expr_ty(expr, arena, &locals, defined_types, exprs, type_by_expr);
 
-                if !is_compatible_to(type_by_expr.of(lhs), type_by_expr.of(rhs)) {
+                if is_compatible_to(type_by_expr.of(lhs), type_by_expr.of(rhs)) ||
+                    type_by_expr.try_coerce_any(lhs, rhs) {
+                    //
+                } else {
                     log::debug!(
                         "incompatible types in assignment, got {:?} and {:?}",
                         type_by_expr.of(lhs),
@@ -579,7 +643,7 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast, 'expr>(
                     type_by_expr,
                 );
                 if !is_compatible_to(type_by_expr.of(cond), arena.alloc(Type::Bool)) {
-                    log::debug!("only boolean expressions are allowed in if conditions");
+                    log::debug!("only boolean expressions are allowed in if conditions, got {:?}", type_by_expr.of(cond));
                     continue;
                 }
                 Item::If {
@@ -651,7 +715,10 @@ pub(crate) fn infer_types<'ast, 'tcx: 'ast, 'expr>(
                     panic!("return outside of a function");
                 }
                 let expr = deduce_expr_ty(expr, arena, locals, defined_types, exprs, type_by_expr);
-                if !is_compatible_to(type_by_expr.of(expr), expected_ret_ty.unwrap()) {
+                if is_compatible_to(type_by_expr.of(expr), expected_ret_ty.unwrap()) ||
+                    type_by_expr.try_coerce(expr, expected_ret_ty.unwrap()) {
+                    //
+                } else {
                     log::debug!(
                         "function marked as returning {:?} but returned {:?}",
                         expected_ret_ty.unwrap(),

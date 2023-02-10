@@ -1,11 +1,11 @@
-use std::cell::RefCell;
+use std::{fmt, io};
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::io::Write;
-use std::{fmt, io};
 
-use crate::type_checking::{make_expr, ExprRef, ExprToType, Expression, Item};
+use crate::{Arena, ast};
+use crate::type_checking::{Expression, ExprRef, ExprToType, Item, make_expr};
 use crate::types::{Type, TypeRef};
-use crate::{ast, Arena};
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
 pub(crate) struct Var(usize);
@@ -26,10 +26,110 @@ impl fmt::Debug for Var {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Bits {
+    value: u64,
+    width: u32,
+}
+
+macro_rules! impl_bits_for {
+    ($t: ty) => {
+        impl From<$t> for Bits {
+            #[inline]
+            fn from(value: $t) -> Self {
+                Self {
+                    value: value as u64,
+                    width: <$t>::BITS,
+                }
+            }
+        }
+    }
+}
+
+impl_bits_for!(usize);
+impl_bits_for!(i32);
+impl_bits_for!(i64);
+
+impl Bits {
+    fn value(&self) -> i64 {
+        let mask = ((1u128 << (self.width + 1)) - 1) as u64;
+        let sign = 1u64 << (self.width - 1);
+        if self.value & mask & sign != 0 {
+            let sign_ext = u64::MAX ^ mask;
+            ((self.value & mask) | sign_ext) as _
+        } else {
+            (self.value & mask) as _
+        }
+    }
+
+    fn add(&self, other: &Self) -> Self {
+        assert_eq!(self.width, other.width);
+        Self {
+            value: (self.value() + other.value()) as _,
+            width: self.width,
+        }
+    }
+
+    fn sub(&self, other: &Self) -> Self {
+        assert_eq!(self.width, other.width);
+        Self {
+            value: self.value().saturating_sub(other.value()) as _,
+            width: self.width,
+        }
+    }
+
+    fn mul(&self, other: &Self) -> Self {
+        assert_eq!(self.width, other.width);
+        Self {
+            value: (self.value() * other.value()) as _,
+            width: self.width,
+        }
+    }
+
+    fn div(&self, other: &Self) -> Self {
+        assert_eq!(self.width, other.width);
+        Self {
+            value: (self.value() / other.value()) as _,
+            width: self.width,
+        }
+    }
+
+    fn cmp(&self, other: &Self) -> Ordering {
+        assert_eq!(self.width, other.width);
+        self.value().cmp(&other.value())
+    }
+
+    fn negate(&self) -> Self {
+        Self {
+            value: (-self.value()) as _,
+            width: self.width,
+        }
+    }
+
+    fn as_usize(&self) -> usize {
+        self.value.try_into().unwrap()
+    }
+
+    fn as_i64(&self) -> i64 {
+        self.value as i64
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ir::Bits;
+
+    #[test]
+    fn test_bits_value() {
+        let a = Bits::from(-10i32);
+        assert_eq!(a.value(), -10);
+        assert_eq!(a.negate().value(), 10);
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub(crate) enum Const {
-    U32(u32),
-    I32(i32),
+    Integer(Bits),
     F32(f32),
     Bool(bool),
     Struct,
@@ -39,10 +139,10 @@ pub(crate) enum Const {
 impl Expression<'_> {
     pub(crate) fn as_const(&self) -> Option<Const> {
         match self {
-            Expression::Integer(x) => Some(Const::I32(*x as _)),
+            Expression::Integer(bits) => Some(Const::Integer(*bits)),
             Expression::Float(x) => Some(Const::F32(*x as _)),
             Expression::Prefix(ast::Operator::Negate, inner) => match inner.as_const()? {
-                Const::I32(val) => Some(Const::I32(-val)),
+                Const::Integer(val) => Some(Const::Integer(val.negate())),
                 _ => None,
             },
             Expression::Bool(x) => Some(Const::Bool(*x)),
@@ -55,6 +155,8 @@ impl Expression<'_> {
 enum CastType {
     F32ToI32,
     I32ToF32,
+    U32ToI32,
+    I32ToU32,
 }
 
 enum Instr {
@@ -279,7 +381,7 @@ fn visit_expr<'expr, 'tcx>(
         Expression::Identifier(ident) => names[ident],
         Expression::Integer(val) => {
             let var = builder.make_var(type_by_expr.of(expr), None);
-            builder.push(block, Instr::Const(var, Const::I32(*val as i32)));
+            builder.push(block, Instr::Const(var, Const::Integer(*val as _)));
             var
         }
         Expression::Float(val) => {
@@ -360,6 +462,8 @@ fn visit_expr<'expr, 'tcx>(
                     match (type_by_expr.of(source_expr), type_by_expr.of(expr)) {
                         (Type::F32, Type::I32) => CastType::F32ToI32,
                         (Type::I32, Type::F32) => CastType::I32ToF32,
+                        (Type::U32, Type::I32) => CastType::U32ToI32,
+                        (Type::I32, Type::U32) => CastType::I32ToU32,
                         (a, b) => todo!("{:?} {:?}", a, b),
                     },
                 ),
@@ -520,7 +624,7 @@ fn visit_item<'expr, 'tcx>(
                             exprs,
                             type_by_expr,
                             &Type::I32,
-                            Expression::Integer(0),
+                            Expression::Integer(0.into()),
                         )),
                     },
                     Item::Loop {
@@ -531,7 +635,7 @@ fn visit_item<'expr, 'tcx>(
                                     exprs,
                                     type_by_expr,
                                     &Type::I32,
-                                    Expression::Integer(len as i64),
+                                    Expression::Integer(len.into()),
                                 ),
                                 make_expr(
                                     exprs,
@@ -577,7 +681,7 @@ fn visit_item<'expr, 'tcx>(
                                     &Type::I32,
                                     Expression::Identifier(index_id.clone()),
                                 ),
-                                make_expr(exprs, type_by_expr, &Type::I32, Expression::Integer(1)),
+                                make_expr(exprs, type_by_expr, &Type::I32, Expression::Integer(1.into())),
                             );
                             items.push(Item::Assignment {
                                 lhs: make_expr(
@@ -608,8 +712,8 @@ fn visit_item<'expr, 'tcx>(
             }
             &Type::Range => {
                 let Expression::Range(start_expr, end_expr) = &expr else {
-                        todo!();
-                    };
+                    todo!();
+                };
                 let end_expr = end_expr.as_ref().unwrap();
 
                 let start = visit_expr(
@@ -632,7 +736,7 @@ fn visit_item<'expr, 'tcx>(
                             exprs,
                             type_by_expr,
                             &Type::I32,
-                            Expression::Integer(0),
+                            Expression::Integer(0.into()),
                         )),
                     },
                     Item::Loop {
@@ -661,7 +765,7 @@ fn visit_item<'expr, 'tcx>(
                                     &Type::I32,
                                     Expression::Identifier(index.clone()),
                                 ),
-                                make_expr(exprs, type_by_expr, &Type::I32, Expression::Integer(1)),
+                                make_expr(exprs, type_by_expr, &Type::I32, Expression::Integer(1.into())),
                             );
                             items.push(Item::Assignment {
                                 lhs: make_expr(
@@ -849,7 +953,7 @@ pub(crate) fn execute_ir(
                     }
                     Instr::UnaryOperation(dst, op, a) => {
                         let val = match (op, vars[a]) {
-                            (ast::Operator::Negate, Const::I32(v)) => Const::I32(-v),
+                            (ast::Operator::Negate, Const::Integer(v)) => Const::Integer(v.negate()),
                             (ast::Operator::Negate, Const::F32(v)) => Const::F32(-v),
                             (ast::Operator::Ref, _) => {
                                 log::error!("unsupported ref op");
@@ -865,78 +969,27 @@ pub(crate) fn execute_ir(
                         let a = vars.get(a).copied().unwrap_or(Const::Undefined);
                         let b = vars.get(b).copied().unwrap_or(Const::Undefined);
                         let val = match (op, a, b) {
-                            (ast::Operator::Add, Const::I32(a), Const::I32(b)) => Const::I32(a + b),
-                            (ast::Operator::Mul, Const::I32(a), Const::I32(b)) => Const::I32(a * b),
-                            (ast::Operator::Sub, Const::I32(a), Const::I32(b)) => {
-                                Const::I32(a.saturating_sub(b))
-                            }
-                            (ast::Operator::Div, Const::I32(a), Const::I32(b)) => Const::I32(a / b),
-                            (ast::Operator::Less, Const::I32(a), Const::I32(b)) => {
-                                Const::Bool(a < b)
-                            }
-                            (ast::Operator::Greater, Const::I32(a), Const::I32(b)) => {
-                                Const::Bool(a > b)
-                            }
-                            (ast::Operator::Equal, Const::I32(a), Const::I32(b)) => {
-                                Const::Bool(a == b)
-                            }
-                            (ast::Operator::NotEqual, Const::I32(a), Const::I32(b)) => {
-                                Const::Bool(a != b)
-                            }
-                            (ast::Operator::LessEqual, Const::I32(a), Const::I32(b)) => {
-                                Const::Bool(a <= b)
-                            }
-                            (ast::Operator::GreaterEqual, Const::I32(a), Const::I32(b)) => {
-                                Const::Bool(a >= b)
-                            }
-
-                            (ast::Operator::Add, Const::U32(a), Const::U32(b)) => Const::U32(a + b),
-                            (ast::Operator::Mul, Const::U32(a), Const::U32(b)) => Const::U32(a * b),
-                            (ast::Operator::Sub, Const::U32(a), Const::U32(b)) => {
-                                Const::U32(a.saturating_sub(b))
-                            }
-                            (ast::Operator::Div, Const::U32(a), Const::U32(b)) => Const::U32(a / b),
-                            (ast::Operator::Less, Const::U32(a), Const::U32(b)) => {
-                                Const::Bool(a < b)
-                            }
-                            (ast::Operator::Greater, Const::U32(a), Const::U32(b)) => {
-                                Const::Bool(a > b)
-                            }
-                            (ast::Operator::Equal, Const::U32(a), Const::U32(b)) => {
-                                Const::Bool(a == b)
-                            }
-                            (ast::Operator::NotEqual, Const::U32(a), Const::U32(b)) => {
-                                Const::Bool(a != b)
-                            }
-                            (ast::Operator::LessEqual, Const::U32(a), Const::U32(b)) => {
-                                Const::Bool(a <= b)
-                            }
-                            (ast::Operator::GreaterEqual, Const::U32(a), Const::U32(b)) => {
-                                Const::Bool(a >= b)
-                            }
+                            (ast::Operator::Add, Const::Integer(a), Const::Integer(b)) => Const::Integer(a.add(&b)),
+                            (ast::Operator::Mul, Const::Integer(a), Const::Integer(b)) => Const::Integer(a.mul(&b)),
+                            (ast::Operator::Sub, Const::Integer(a), Const::Integer(b)) => Const::Integer(a.sub(&b)),
+                            (ast::Operator::Div, Const::Integer(a), Const::Integer(b)) => Const::Integer(a.div(&b)),
+                            (ast::Operator::Less, Const::Integer(a), Const::Integer(b)) => Const::Bool(a.cmp(&b).is_lt()),
+                            (ast::Operator::Greater, Const::Integer(a), Const::Integer(b)) => Const::Bool(a.cmp(&b).is_gt()),
+                            (ast::Operator::Equal, Const::Integer(a), Const::Integer(b)) => Const::Bool(a.cmp(&b).is_eq()),
+                            (ast::Operator::NotEqual, Const::Integer(a), Const::Integer(b)) => Const::Bool(a.cmp(&b).is_ne()),
+                            (ast::Operator::LessEqual, Const::Integer(a), Const::Integer(b)) => Const::Bool(a.cmp(&b).is_le()),
+                            (ast::Operator::GreaterEqual, Const::Integer(a), Const::Integer(b)) => Const::Bool(a.cmp(&b).is_ge()),
 
                             (ast::Operator::Add, Const::F32(a), Const::F32(b)) => Const::F32(a + b),
                             (ast::Operator::Mul, Const::F32(a), Const::F32(b)) => Const::F32(a * b),
                             (ast::Operator::Sub, Const::F32(a), Const::F32(b)) => Const::F32(a - b),
                             (ast::Operator::Div, Const::F32(a), Const::F32(b)) => Const::F32(a / b),
-                            (ast::Operator::Less, Const::F32(a), Const::F32(b)) => {
-                                Const::Bool(a < b)
-                            }
-                            (ast::Operator::Greater, Const::F32(a), Const::F32(b)) => {
-                                Const::Bool(a > b)
-                            }
-                            (ast::Operator::Equal, Const::F32(a), Const::F32(b)) => {
-                                Const::Bool(a == b)
-                            }
-                            (ast::Operator::NotEqual, Const::F32(a), Const::F32(b)) => {
-                                Const::Bool(a != b)
-                            }
-                            (ast::Operator::LessEqual, Const::F32(a), Const::F32(b)) => {
-                                Const::Bool(a <= b)
-                            }
-                            (ast::Operator::GreaterEqual, Const::F32(a), Const::F32(b)) => {
-                                Const::Bool(a >= b)
-                            }
+                            (ast::Operator::Less, Const::F32(a), Const::F32(b)) => Const::Bool(a < b),
+                            (ast::Operator::Greater, Const::F32(a), Const::F32(b)) => Const::Bool(a > b),
+                            (ast::Operator::Equal, Const::F32(a), Const::F32(b)) => Const::Bool(a == b),
+                            (ast::Operator::NotEqual, Const::F32(a), Const::F32(b)) => Const::Bool(a != b),
+                            (ast::Operator::LessEqual, Const::F32(a), Const::F32(b)) => Const::Bool(a <= b),
+                            (ast::Operator::GreaterEqual, Const::F32(a), Const::F32(b)) => Const::Bool(a >= b),
 
                             (op, Const::Undefined, _) => {
                                 log::warn!(
@@ -962,8 +1015,7 @@ pub(crate) fn execute_ir(
                     }
                     Instr::GetElement(var, arr, index) => {
                         let index = match vars[index] {
-                            Const::U32(v) => v as usize,
-                            Const::I32(v) => v as usize,
+                            Const::Integer(v) => v.as_usize(),
                             other => unimplemented!("{:?}", other),
                         };
                         vars.insert(*var, vars_arrays[&(*arr, index)]);
@@ -974,9 +1026,10 @@ pub(crate) fn execute_ir(
                             *target,
                             match (mode, source) {
                                 (_, Const::Undefined) => Const::Undefined,
-                                (CastType::F32ToI32, Const::F32(val)) => Const::I32(val as i32),
-                                (CastType::I32ToF32, Const::I32(val)) => Const::F32(val as f32),
-                                _ => todo!(),
+                                (CastType::F32ToI32, Const::F32(val)) => Const::Integer((val as i32).into()),
+                                (CastType::I32ToF32, Const::Integer(val)) => Const::F32(val.as_i64() as _),
+                                (CastType::U32ToI32, Const::Integer(val)) => Const::Integer(val.try_into().unwrap()),
+                                _ => todo!("{:?} {:?}", mode, &source),
                             },
                         );
                     }
