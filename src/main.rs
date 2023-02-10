@@ -19,7 +19,6 @@ use crate::type_checking::{ExprToType, Expression, Item, TypeCheckerContext};
 
 mod arena;
 mod ast;
-// mod codegen;
 mod ir;
 mod lexer;
 mod multi_peek;
