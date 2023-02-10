@@ -11,7 +11,7 @@ fn is_coercible_to(ty: TypeRef<'_>, target: TypeRef<'_>) -> bool {
     match (ty, target) {
         (Type::Integer, Type::I32 | Type::U32) => true,
         (Type::Float, Type::F32) => true,
-        _ => false
+        _ => false,
     }
 }
 
@@ -30,9 +30,9 @@ fn is_compatible_to(ty: TypeRef<'_>, subty: TypeRef<'_>) -> bool {
         (Type::Tuple(ty1), Type::Tuple(ty2)) => {
             ty1.len() == ty2.len()
                 && ty1
-                .iter()
-                .zip(ty2.iter())
-                .all(|(ty1, ty2)| is_compatible_to(ty1, ty2))
+                    .iter()
+                    .zip(ty2.iter())
+                    .all(|(ty1, ty2)| is_compatible_to(ty1, ty2))
         }
         (Type::Function(args1, ret1), Type::Function(args2, ret2)) => {
             if args1.len() != args2.len() {
@@ -174,7 +174,12 @@ impl<'tcx> ExprToType<'tcx> {
     }
 
     fn try_coerce(&mut self, expr: ExprRef<'_>, ty: TypeRef<'tcx>) -> bool {
-        log::debug!("trying coercion of {:?} with type {:?} to {:?}", expr, self.of(expr), ty);
+        log::debug!(
+            "trying coercion of {:?} with type {:?} to {:?}",
+            expr,
+            self.of(expr),
+            ty
+        );
         match self.of(expr) {
             Type::Unknown => panic!("coercion failed??"),
             other if is_coercible_to(other, ty) => {
@@ -186,8 +191,7 @@ impl<'tcx> ExprToType<'tcx> {
     }
 
     pub(crate) fn try_coerce_any(&mut self, lhs: ExprRef<'_>, rhs: ExprRef<'_>) -> bool {
-        if self.try_coerce(lhs, self.of(rhs)) ||
-            self.try_coerce(rhs, self.of(lhs)) {
+        if self.try_coerce(lhs, self.of(rhs)) || self.try_coerce(rhs, self.of(lhs)) {
             return true;
         }
 
@@ -209,7 +213,6 @@ impl<'tcx> ExprToType<'tcx> {
     }
 }
 
-
 pub(crate) struct TypeCheckerContext<'tcx, 'expr, 'ast> {
     pub(crate) arena: &'tcx Arena<Type<'tcx>>,
     pub(crate) locals: HashMap<&'ast str, TypeRef<'tcx>>,
@@ -219,13 +222,10 @@ pub(crate) struct TypeCheckerContext<'tcx, 'expr, 'ast> {
 }
 
 impl<'ast, 'tcx, 'expr> TypeCheckerContext<'tcx, 'expr, 'ast>
-    where 'ast: 'expr
+where
+    'ast: 'expr,
 {
-    pub(crate) fn make_expr(
-        &mut self,
-        ty: TypeRef<'tcx>,
-        expr: Expression<'expr>,
-    ) -> ExprRef<'expr> {
+    fn make_expr(&mut self, ty: TypeRef<'tcx>, expr: Expression<'expr>) -> ExprRef<'expr> {
         let expr = self.exprs.alloc(expr);
         self.type_by_expr.insert(expr, ty);
         expr
@@ -237,14 +237,14 @@ impl<'ast, 'tcx, 'expr> TypeCheckerContext<'tcx, 'expr, 'ast>
             ast::Expression::Integer(val) => (
                 // FIXME: type
                 Expression::Integer((*val as i32).into()),
-                self.arena.alloc(Type::Integer)
+                self.arena.alloc(Type::Integer),
             ),
             ast::Expression::Float(val) => (Expression::Float(*val), self.arena.alloc(Type::Float)),
             ast::Expression::Infix(op, lhs, rhs) => {
                 let lhs = self.deduce_expr_ty(lhs);
                 let rhs = self.deduce_expr_ty(rhs);
-                let ty = if is_compatible_to(self.type_by_expr.of(lhs), self.type_by_expr.of(rhs)) ||
-                    self.type_by_expr.try_coerce_any(lhs, rhs)
+                let ty = if is_compatible_to(self.type_by_expr.of(lhs), self.type_by_expr.of(rhs))
+                    || self.type_by_expr.try_coerce_any(lhs, rhs)
                 {
                     match op {
                         ast::Operator::Less
@@ -264,10 +264,10 @@ impl<'ast, 'tcx, 'expr> TypeCheckerContext<'tcx, 'expr, 'ast>
                     }
                 } else {
                     log::debug!(
-                    "mismatched types {:?} and {:?}",
-                    self.type_by_expr.of(lhs),
-                    self.type_by_expr.of(rhs)
-                );
+                        "mismatched types {:?} and {:?}",
+                        self.type_by_expr.of(lhs),
+                        self.type_by_expr.of(rhs)
+                    );
                     self.arena.alloc(Type::Error)
                 };
 
@@ -276,7 +276,9 @@ impl<'ast, 'tcx, 'expr> TypeCheckerContext<'tcx, 'expr, 'ast>
             ast::Expression::Prefix(op, expr) => {
                 let inner = self.deduce_expr_ty(expr);
                 let ty = match op {
-                    ast::Operator::Ref => self.arena.alloc(Type::Pointer(self.type_by_expr.of(inner))),
+                    ast::Operator::Ref => {
+                        self.arena.alloc(Type::Pointer(self.type_by_expr.of(inner)))
+                    }
                     ast::Operator::Deref => match self.type_by_expr.of(inner) {
                         Type::Pointer(inner) => inner,
                         _ => unimplemented!(),
@@ -314,30 +316,28 @@ impl<'ast, 'tcx, 'expr> TypeCheckerContext<'tcx, 'expr, 'ast>
             }
             ast::Expression::Array(items) => {
                 if items.is_empty() {
-                    return self.make_expr(
-                        self.arena.alloc(Type::Unknown),
-                        Expression::Error,
-                    );
+                    return self.make_expr(self.arena.alloc(Type::Unknown), Expression::Error);
                 }
 
                 let mut values = Vec::new();
 
-                let first =
-                    self.deduce_expr_ty(&items[0]);
+                let first = self.deduce_expr_ty(&items[0]);
                 let item_ty = self.type_by_expr.of(first);
                 values.push(first);
 
                 for next in items.iter().skip(1) {
                     let expr = self.deduce_expr_ty(next);
-                    if is_compatible_to(self.type_by_expr.of(expr), item_ty) ||
-                        self.type_by_expr.try_coerce_any(expr, first) {
+                    if is_compatible_to(self.type_by_expr.of(expr), item_ty)
+                        || self.type_by_expr.try_coerce_any(expr, first)
+                    {
                         //
                     } else {
-                        log::debug!("incompatible types: {:?} and {:?}", self.type_by_expr.of(expr), item_ty);
-                        return self.make_expr(
-                            self.arena.alloc(Type::Error),
-                            Expression::Error,
+                        log::debug!(
+                            "incompatible types: {:?} and {:?}",
+                            self.type_by_expr.of(expr),
+                            item_ty
                         );
+                        return self.make_expr(self.arena.alloc(Type::Error), Expression::Error);
                     }
                     values.push(expr);
                 }
@@ -351,14 +351,14 @@ impl<'ast, 'tcx, 'expr> TypeCheckerContext<'tcx, 'expr, 'ast>
                 ast::Expression::Identifier(ident) => {
                     let callee = match ident.as_str() {
                         "debug" => {
-                            let ty = self.arena.alloc(Type::Function(vec![&Type::Any], &Type::Any));
-                            self.make_expr(
-                                ty,
-                                Expression::Intrinsic(Intrinsic::debug),
-                            )
+                            let ty = self
+                                .arena
+                                .alloc(Type::Function(vec![&Type::Any], &Type::Any));
+                            self.make_expr(ty, Expression::Intrinsic(Intrinsic::debug))
                         }
                         other => {
-                            let ty = self.locals
+                            let ty = self
+                                .locals
                                 .get(other)
                                 .unwrap_or_else(|| panic!("a type for {}", other));
                             self.deduce_expr_ty(callee)
@@ -369,32 +369,28 @@ impl<'ast, 'tcx, 'expr> TypeCheckerContext<'tcx, 'expr, 'ast>
                         Type::Function(args_ty, ret_ty) => (args_ty, ret_ty),
                         _ => {
                             log::debug!("{} is not callable", ident.as_str());
-                            return self.make_expr(
-                                self.arena.alloc(Type::Error),
-                                Expression::Error,
-                            );
+                            return self
+                                .make_expr(self.arena.alloc(Type::Error), Expression::Error);
                         }
                     };
 
                     let mut values = Vec::new();
 
                     for (arg, expected_ty) in args.iter().zip(args_ty) {
-                        let arg =
-                            self.deduce_expr_ty(arg);
+                        let arg = self.deduce_expr_ty(arg);
 
-                        if is_compatible_to(self.type_by_expr.of(arg), expected_ty) ||
-                            self.type_by_expr.try_coerce(arg, expected_ty) {
+                        if is_compatible_to(self.type_by_expr.of(arg), expected_ty)
+                            || self.type_by_expr.try_coerce(arg, expected_ty)
+                        {
                             //
                         } else {
                             log::debug!(
-                            "incompatible types {:?} and {:?}",
-                            self.type_by_expr.of(arg),
-                            expected_ty
-                        );
-                            return self.make_expr(
-                                self.arena.alloc(Type::Error),
-                                Expression::Error,
+                                "incompatible types {:?} and {:?}",
+                                self.type_by_expr.of(arg),
+                                expected_ty
                             );
+                            return self
+                                .make_expr(self.arena.alloc(Type::Error), Expression::Error);
                         }
 
                         values.push(arg);
@@ -408,16 +404,17 @@ impl<'ast, 'tcx, 'expr> TypeCheckerContext<'tcx, 'expr, 'ast>
                 let from = self.deduce_expr_ty(from);
                 let to = self.deduce_expr_ty(to);
                 if is_compatible_to(self.type_by_expr.of(from), self.type_by_expr.of(to))
-                    || self.type_by_expr.try_coerce_any(from, to) {
+                    || self.type_by_expr.try_coerce_any(from, to)
+                {
                     //
                 } else {
                     log::debug!("incompatible range bounds");
-                    return self.make_expr(
-                        self.arena.alloc(Type::Error),
-                        Expression::Error,
-                    );
+                    return self.make_expr(self.arena.alloc(Type::Error), Expression::Error);
                 }
-                (Expression::Range(from, Some(to)), self.arena.alloc(Type::Range))
+                (
+                    Expression::Range(from, Some(to)),
+                    self.arena.alloc(Type::Range),
+                )
             }
             ast::Expression::Range(to, None) => {
                 unimplemented!()
@@ -432,15 +429,17 @@ impl<'ast, 'tcx, 'expr> TypeCheckerContext<'tcx, 'expr, 'ast>
                     values.push(expr);
                 }
 
-                (Expression::Tuple(values), self.arena.alloc(Type::Tuple(types)))
+                (
+                    Expression::Tuple(values),
+                    self.arena.alloc(Type::Tuple(types)),
+                )
             }
             ast::Expression::Index(array_expr, index_expr) => {
                 let array = self.deduce_expr_ty(array_expr);
                 let index = self.deduce_expr_ty(index_expr);
 
                 let ty = match (self.type_by_expr.of(array), self.type_by_expr.of(index)) {
-                    (Type::Array(_, item_ty), idx)
-                    | (Type::Slice(item_ty), idx) => {
+                    (Type::Array(_, item_ty), idx) | (Type::Slice(item_ty), idx) => {
                         self.type_by_expr.try_coerce(array, &Type::I32);
                         idx
                     }
@@ -463,9 +462,7 @@ impl<'ast, 'tcx, 'expr> TypeCheckerContext<'tcx, 'expr, 'ast>
 
                 let fields = fields
                     .iter()
-                    .map(|(name, expr)| {
-                        self.deduce_expr_ty(expr)
-                    })
+                    .map(|(name, expr)| self.deduce_expr_ty(expr))
                     .collect();
                 (Expression::StructLiteral(fields), ty)
             }
@@ -477,7 +474,7 @@ impl<'ast, 'tcx, 'expr> TypeCheckerContext<'tcx, 'expr, 'ast>
         &mut self,
         items: &'ast [ast::Item],
         expected_ret_ty: Option<TypeRef<'tcx>>,
-    ) -> Vec<Item<'expr, 'tcx>>  {
+    ) -> Vec<Item<'expr, 'tcx>> {
         let mut lowered_items = Vec::new();
 
         for item in items.iter() {
@@ -491,23 +488,26 @@ impl<'ast, 'tcx, 'expr> TypeCheckerContext<'tcx, 'expr, 'ast>
                         log::debug!("no expression on the right hand side of the let binding");
                         continue;
                     }
-                    let expr = self.deduce_expr_ty(
-                        expr.as_ref().unwrap(),
-                    );
+                    let expr = self.deduce_expr_ty(expr.as_ref().unwrap());
                     log::debug!("deduced type {:?} for binding {}", expr, name);
                     let ty = match expected_ty {
                         Some(expected) => {
                             let target_ty = self.unify(expected);
                             let source_ty = self.type_by_expr.of(expr);
-                            if is_compatible_to(target_ty, source_ty) ||
-                                self.type_by_expr.try_coerce(expr, target_ty) {
+                            if is_compatible_to(target_ty, source_ty)
+                                || self.type_by_expr.try_coerce(expr, target_ty)
+                            {
                                 target_ty
                             } else {
-                                log::debug!("mismatched types. expected {:?}, got {:?}", target_ty, source_ty);
+                                log::debug!(
+                                    "mismatched types. expected {:?}, got {:?}",
+                                    target_ty,
+                                    source_ty
+                                );
                                 continue;
                             }
                         }
-                        None => &self.type_by_expr.of(expr),
+                        None => self.type_by_expr.of(expr),
                     };
                     self.locals.insert(name, ty);
 
@@ -525,15 +525,16 @@ impl<'ast, 'tcx, 'expr> TypeCheckerContext<'tcx, 'expr, 'ast>
                     let lhs = self.deduce_expr_ty(lhs);
                     let rhs = self.deduce_expr_ty(expr);
 
-                    if is_compatible_to(self.type_by_expr.of(lhs), self.type_by_expr.of(rhs)) ||
-                        self.type_by_expr.try_coerce_any(lhs, rhs) {
+                    if is_compatible_to(self.type_by_expr.of(lhs), self.type_by_expr.of(rhs))
+                        || self.type_by_expr.try_coerce_any(lhs, rhs)
+                    {
                         //
                     } else {
                         log::debug!(
-                        "incompatible types in assignment, got {:?} and {:?}",
-                        self.type_by_expr.of(lhs),
-                        self.type_by_expr.of(rhs)
-                    );
+                            "incompatible types in assignment, got {:?} and {:?}",
+                            self.type_by_expr.of(lhs),
+                            self.type_by_expr.of(rhs)
+                        );
                         continue;
                     }
 
@@ -556,12 +557,10 @@ impl<'ast, 'tcx, 'expr> TypeCheckerContext<'tcx, 'expr, 'ast>
                 } => {
                     let mut args = Vec::new();
                     for param in params {
-                        let ty = self.unify(&param.r#type,);
+                        let ty = self.unify(&param.r#type);
                         log::debug!("Found arg {} of type {:?}", &param.name, ty);
-                        self.locals.insert(
-                            param.name.as_str(),
-                            self.unify(&param.r#type),
-                        );
+                        self.locals
+                            .insert(param.name.as_str(), self.unify(&param.r#type));
                         args.push(ty);
                     }
 
@@ -569,10 +568,7 @@ impl<'ast, 'tcx, 'expr> TypeCheckerContext<'tcx, 'expr, 'ast>
                     let func_ty = self.arena.alloc(func_ty);
                     self.locals.insert(name.as_str(), func_ty);
 
-                    let body = self.infer_types(
-                        body,
-                        Some(self.unify(ty)),
-                    );
+                    let body = self.infer_types(body, Some(self.unify(ty)));
                     Item::Function {
                         name: name.clone(),
                         is_extern: false,
@@ -590,14 +586,10 @@ impl<'ast, 'tcx, 'expr> TypeCheckerContext<'tcx, 'expr, 'ast>
                 ast::Item::Struct { name, fields } => {
                     let fields: Vec<_> = fields
                         .iter()
-                        .map(|field| {
-                            (
-                                field.name.clone(),
-                                self.unify(&field.r#type),
-                            )
-                        })
+                        .map(|field| (field.name.clone(), self.unify(&field.r#type)))
                         .collect();
-                    self.defined_types.insert(name, self.arena.alloc(Type::Struct { fields }));
+                    self.defined_types
+                        .insert(name, self.arena.alloc(Type::Struct { fields }));
                     continue;
                 }
                 ast::Item::If {
@@ -605,24 +597,19 @@ impl<'ast, 'tcx, 'expr> TypeCheckerContext<'tcx, 'expr, 'ast>
                     arm_true,
                     arm_false,
                 } => {
-                    let cond = self.deduce_expr_ty(
-                        condition,
-                    );
+                    let cond = self.deduce_expr_ty(condition);
                     if !is_compatible_to(self.type_by_expr.of(cond), self.arena.alloc(Type::Bool)) {
-                        log::debug!("only boolean expressions are allowed in if conditions, got {:?}", self.type_by_expr.of(cond));
+                        log::debug!(
+                            "only boolean expressions are allowed in if conditions, got {:?}",
+                            self.type_by_expr.of(cond)
+                        );
                         continue;
                     }
                     Item::If {
                         condition: cond,
-                        arm_true: self.infer_types(
-                            arm_true,
-                            expected_ret_ty,
-                        ),
+                        arm_true: self.infer_types(arm_true, expected_ret_ty),
                         arm_false: if let Some(arm_false) = arm_false {
-                            Some(self.infer_types(
-                                arm_false,
-                                expected_ret_ty,
-                            ))
+                            Some(self.infer_types(arm_false, expected_ret_ty))
                         } else {
                             None
                         },
@@ -639,11 +626,9 @@ impl<'ast, 'tcx, 'expr> TypeCheckerContext<'tcx, 'expr, 'ast>
                         log::debug!("{:?} is not iterable", self.type_by_expr.of(expr));
                         continue;
                     }
-                    self.locals.insert(name.as_str(), self.arena.alloc(Type::I32));
-                    let body = self.infer_types(
-                        body,
-                        expected_ret_ty,
-                    );
+                    self.locals
+                        .insert(name.as_str(), self.arena.alloc(Type::I32));
+                    let body = self.infer_types(body, expected_ret_ty);
                     Item::ForIn {
                         name: name.clone(),
                         expr,
@@ -651,25 +636,23 @@ impl<'ast, 'tcx, 'expr> TypeCheckerContext<'tcx, 'expr, 'ast>
                     }
                 }
                 ast::Item::Loop { body } => Item::Loop {
-                    body: self.infer_types(
-                        body,
-                        expected_ret_ty,
-                    ),
+                    body: self.infer_types(body, expected_ret_ty),
                 },
                 ast::Item::Return(expr) => {
                     if expected_ret_ty.is_none() {
                         panic!("return outside of a function");
                     }
                     let expr = self.deduce_expr_ty(expr);
-                    if is_compatible_to(self.type_by_expr.of(expr), expected_ret_ty.unwrap()) ||
-                        self.type_by_expr.try_coerce(expr, expected_ret_ty.unwrap()) {
+                    if is_compatible_to(self.type_by_expr.of(expr), expected_ret_ty.unwrap())
+                        || self.type_by_expr.try_coerce(expr, expected_ret_ty.unwrap())
+                    {
                         //
                     } else {
                         log::debug!(
-                        "function marked as returning {:?} but returned {:?}",
-                        expected_ret_ty.unwrap(),
-                        expr
-                    );
+                            "function marked as returning {:?} but returned {:?}",
+                            expected_ret_ty.unwrap(),
+                            expr
+                        );
                         continue;
                     }
                     Item::Return(expr)
@@ -677,10 +660,7 @@ impl<'ast, 'tcx, 'expr> TypeCheckerContext<'tcx, 'expr, 'ast>
                 ast::Item::Break => Item::Break,
                 ast::Item::Yield(_) => unimplemented!(),
                 ast::Item::Block(body) => {
-                    self.infer_types(
-                        body,
-                        expected_ret_ty,
-                    );
+                    self.infer_types(body, expected_ret_ty);
                     todo!()
                 }
                 ast::Item::Assert(expr) => {

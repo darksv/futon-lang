@@ -14,7 +14,7 @@ use parser::Parser;
 
 use crate::arena::Arena;
 use crate::ast::Operator;
-use crate::ir::{build_ir, dump_ir, execute_ir, Const, validate_types};
+use crate::ir::{build_ir, dump_ir, execute_ir, validate_types, Const};
 use crate::type_checking::{ExprToType, Expression, Item, TypeCheckerContext};
 
 mod arena;
@@ -61,7 +61,6 @@ fn compile_file(path: impl AsRef<Path>) -> bool {
     let mut parser = Parser::new(lex);
     match parser.parse() {
         Ok(mut items) => {
-
             let mut tc_ctx = TypeCheckerContext {
                 arena: &arena,
                 locals: HashMap::new(),
@@ -77,7 +76,8 @@ fn compile_file(path: impl AsRef<Path>) -> bool {
             for item in &items {
                 match item {
                     Item::Function { name, .. } => {
-                        let ir = build_ir(&item, &arena, &tc_ctx.exprs, &mut tc_ctx.type_by_expr).unwrap();
+                        let ir = build_ir(&item, &arena, &tc_ctx.exprs, &mut tc_ctx.type_by_expr)
+                            .unwrap();
                         validate_types(&ir);
                         dump_ir(&ir, &mut std::io::stdout()).unwrap();
                         functions.insert(name.clone(), ir);

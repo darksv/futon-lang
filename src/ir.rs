@@ -1,11 +1,11 @@
-use std::{fmt, io};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::io::Write;
+use std::{fmt, io};
 
-use crate::{Arena, ast};
-use crate::type_checking::{Expression, ExprRef, ExprToType, Item};
+use crate::type_checking::{ExprRef, ExprToType, Expression, Item};
 use crate::types::{Type, TypeRef};
+use crate::{ast, Arena};
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
 pub(crate) struct Var(usize);
@@ -54,7 +54,7 @@ macro_rules! impl_bits_for {
                 }
             }
         }
-    }
+    };
 }
 
 impl_bits_for!(usize);
@@ -703,7 +703,12 @@ fn visit_item<'expr, 'tcx>(
                                     &Type::I32,
                                     Expression::Identifier(index_id.clone()),
                                 ),
-                                make_expr(exprs, type_by_expr, &Type::I32, Expression::Integer(1.into())),
+                                make_expr(
+                                    exprs,
+                                    type_by_expr,
+                                    &Type::I32,
+                                    Expression::Integer(1.into()),
+                                ),
                             );
                             items.push(Item::Assignment {
                                 lhs: make_expr(
@@ -787,7 +792,12 @@ fn visit_item<'expr, 'tcx>(
                                     &Type::I32,
                                     Expression::Identifier(index.clone()),
                                 ),
-                                make_expr(exprs, type_by_expr, &Type::I32, Expression::Integer(1.into())),
+                                make_expr(
+                                    exprs,
+                                    type_by_expr,
+                                    &Type::I32,
+                                    Expression::Integer(1.into()),
+                                ),
                             );
                             items.push(Item::Assignment {
                                 lhs: make_expr(
@@ -975,7 +985,9 @@ pub(crate) fn execute_ir(
                     }
                     Instr::UnaryOperation(dst, op, a) => {
                         let val = match (op, vars[a]) {
-                            (ast::Operator::Negate, Const::Integer(v)) => Const::Integer(v.negate()),
+                            (ast::Operator::Negate, Const::Integer(v)) => {
+                                Const::Integer(v.negate())
+                            }
                             (ast::Operator::Negate, Const::F32(v)) => Const::F32(-v),
                             (ast::Operator::Ref, _) => {
                                 log::error!("unsupported ref op");
@@ -991,27 +1003,59 @@ pub(crate) fn execute_ir(
                         let a = vars.get(a).copied().unwrap_or(Const::Undefined);
                         let b = vars.get(b).copied().unwrap_or(Const::Undefined);
                         let val = match (op, a, b) {
-                            (ast::Operator::Add, Const::Integer(a), Const::Integer(b)) => Const::Integer(a.add(&b)),
-                            (ast::Operator::Mul, Const::Integer(a), Const::Integer(b)) => Const::Integer(a.mul(&b)),
-                            (ast::Operator::Sub, Const::Integer(a), Const::Integer(b)) => Const::Integer(a.sub(&b)),
-                            (ast::Operator::Div, Const::Integer(a), Const::Integer(b)) => Const::Integer(a.div(&b)),
-                            (ast::Operator::Less, Const::Integer(a), Const::Integer(b)) => Const::Bool(a.cmp(&b).is_lt()),
-                            (ast::Operator::Greater, Const::Integer(a), Const::Integer(b)) => Const::Bool(a.cmp(&b).is_gt()),
-                            (ast::Operator::Equal, Const::Integer(a), Const::Integer(b)) => Const::Bool(a.cmp(&b).is_eq()),
-                            (ast::Operator::NotEqual, Const::Integer(a), Const::Integer(b)) => Const::Bool(a.cmp(&b).is_ne()),
-                            (ast::Operator::LessEqual, Const::Integer(a), Const::Integer(b)) => Const::Bool(a.cmp(&b).is_le()),
-                            (ast::Operator::GreaterEqual, Const::Integer(a), Const::Integer(b)) => Const::Bool(a.cmp(&b).is_ge()),
+                            (ast::Operator::Add, Const::Integer(a), Const::Integer(b)) => {
+                                Const::Integer(a.add(&b))
+                            }
+                            (ast::Operator::Mul, Const::Integer(a), Const::Integer(b)) => {
+                                Const::Integer(a.mul(&b))
+                            }
+                            (ast::Operator::Sub, Const::Integer(a), Const::Integer(b)) => {
+                                Const::Integer(a.sub(&b))
+                            }
+                            (ast::Operator::Div, Const::Integer(a), Const::Integer(b)) => {
+                                Const::Integer(a.div(&b))
+                            }
+                            (ast::Operator::Less, Const::Integer(a), Const::Integer(b)) => {
+                                Const::Bool(a.cmp(&b).is_lt())
+                            }
+                            (ast::Operator::Greater, Const::Integer(a), Const::Integer(b)) => {
+                                Const::Bool(a.cmp(&b).is_gt())
+                            }
+                            (ast::Operator::Equal, Const::Integer(a), Const::Integer(b)) => {
+                                Const::Bool(a.cmp(&b).is_eq())
+                            }
+                            (ast::Operator::NotEqual, Const::Integer(a), Const::Integer(b)) => {
+                                Const::Bool(a.cmp(&b).is_ne())
+                            }
+                            (ast::Operator::LessEqual, Const::Integer(a), Const::Integer(b)) => {
+                                Const::Bool(a.cmp(&b).is_le())
+                            }
+                            (ast::Operator::GreaterEqual, Const::Integer(a), Const::Integer(b)) => {
+                                Const::Bool(a.cmp(&b).is_ge())
+                            }
 
                             (ast::Operator::Add, Const::F32(a), Const::F32(b)) => Const::F32(a + b),
                             (ast::Operator::Mul, Const::F32(a), Const::F32(b)) => Const::F32(a * b),
                             (ast::Operator::Sub, Const::F32(a), Const::F32(b)) => Const::F32(a - b),
                             (ast::Operator::Div, Const::F32(a), Const::F32(b)) => Const::F32(a / b),
-                            (ast::Operator::Less, Const::F32(a), Const::F32(b)) => Const::Bool(a < b),
-                            (ast::Operator::Greater, Const::F32(a), Const::F32(b)) => Const::Bool(a > b),
-                            (ast::Operator::Equal, Const::F32(a), Const::F32(b)) => Const::Bool(a == b),
-                            (ast::Operator::NotEqual, Const::F32(a), Const::F32(b)) => Const::Bool(a != b),
-                            (ast::Operator::LessEqual, Const::F32(a), Const::F32(b)) => Const::Bool(a <= b),
-                            (ast::Operator::GreaterEqual, Const::F32(a), Const::F32(b)) => Const::Bool(a >= b),
+                            (ast::Operator::Less, Const::F32(a), Const::F32(b)) => {
+                                Const::Bool(a < b)
+                            }
+                            (ast::Operator::Greater, Const::F32(a), Const::F32(b)) => {
+                                Const::Bool(a > b)
+                            }
+                            (ast::Operator::Equal, Const::F32(a), Const::F32(b)) => {
+                                Const::Bool(a == b)
+                            }
+                            (ast::Operator::NotEqual, Const::F32(a), Const::F32(b)) => {
+                                Const::Bool(a != b)
+                            }
+                            (ast::Operator::LessEqual, Const::F32(a), Const::F32(b)) => {
+                                Const::Bool(a <= b)
+                            }
+                            (ast::Operator::GreaterEqual, Const::F32(a), Const::F32(b)) => {
+                                Const::Bool(a >= b)
+                            }
 
                             (op, Const::Undefined, _) => {
                                 log::warn!(
@@ -1048,9 +1092,15 @@ pub(crate) fn execute_ir(
                             *target,
                             match (mode, source) {
                                 (_, Const::Undefined) => Const::Undefined,
-                                (CastType::F32ToI32, Const::F32(val)) => Const::Integer((val as i32).into()),
-                                (CastType::I32ToF32, Const::Integer(val)) => Const::F32(val.as_i64() as _),
-                                (CastType::U32ToI32, Const::Integer(val)) => Const::Integer(val.try_into().unwrap()),
+                                (CastType::F32ToI32, Const::F32(val)) => {
+                                    Const::Integer((val as i32).into())
+                                }
+                                (CastType::I32ToF32, Const::Integer(val)) => {
+                                    Const::F32(val.as_i64() as _)
+                                }
+                                (CastType::U32ToI32, Const::Integer(val)) => {
+                                    Const::Integer(val.try_into().unwrap())
+                                }
                                 _ => todo!("{:?} {:?}", mode, &source),
                             },
                         );
