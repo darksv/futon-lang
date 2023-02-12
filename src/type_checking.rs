@@ -11,6 +11,7 @@ fn is_coercible_to(ty: TypeRef<'_>, target: TypeRef<'_>) -> bool {
     match (ty, target) {
         (Type::Integer, Type::I32 | Type::U32) => true,
         (Type::Float, Type::F32) => true,
+        (Type::Array(a, x), Type::Array(b, y)) => a == b && is_coercible_to(x, y),
         _ => false,
     }
 }
@@ -320,15 +321,20 @@ where
                 }
 
                 let mut values = Vec::new();
+                let mut first_specific_type = None;
+                for item in items {
+                    let expr = self.deduce_expr_ty(&item);
+                    values.push(expr);
+                    let ty = self.type_by_expr.of(expr);
+                    if first_specific_type.is_none() && !ty.is_abstract() {
+                        first_specific_type = Some(ty);
+                    }
+                }
 
-                let first = self.deduce_expr_ty(&items[0]);
-                let item_ty = self.type_by_expr.of(first);
-                values.push(first);
-
-                for next in items.iter().skip(1) {
-                    let expr = self.deduce_expr_ty(next);
+                let item_ty = first_specific_type.unwrap_or(&Type::I32);
+                for expr in &values {
                     if is_compatible_to(self.type_by_expr.of(expr), item_ty)
-                        || self.type_by_expr.try_coerce_any(expr, first)
+                        || self.type_by_expr.try_coerce(expr, item_ty)
                     {
                         //
                     } else {
@@ -339,7 +345,6 @@ where
                         );
                         return self.make_expr(self.arena.alloc(Type::Error), Expression::Error);
                     }
-                    values.push(expr);
                 }
 
                 (
@@ -484,12 +489,13 @@ where
                     r#type: expected_ty,
                     expr,
                 } => {
-                    if expr.is_none() {
+                    let Some(expr) = expr else {
                         log::debug!("no expression on the right hand side of the let binding");
                         continue;
-                    }
-                    let expr = self.deduce_expr_ty(expr.as_ref().unwrap());
-                    log::debug!("deduced type {:?} for binding {}", expr, name);
+                    };
+
+                    let expr = self.deduce_expr_ty(expr);
+                    log::debug!("deduced type {:?} for binding {}", self.type_by_expr.of(expr), name);
                     let ty = match expected_ty {
                         Some(expected) => {
                             let target_ty = self.unify(expected);
@@ -627,7 +633,7 @@ where
                         continue;
                     }
                     self.locals
-                        .insert(name.as_str(), self.arena.alloc(Type::I32));
+                        .insert(name.as_str(), self.arena.alloc(Type::U32));
                     let body = self.infer_types(body, expected_ret_ty);
                     Item::ForIn {
                         name: name.clone(),

@@ -23,4 +23,13 @@ pub(crate) enum Type<'tcx> {
     Placeholder(usize),
 }
 
+impl<'tcx> Type<'tcx> {
+    pub(crate) fn is_abstract(&self) -> bool {
+        match self {
+            Type::Integer | Type::Float => true,
+            _ => false,
+        }
+    }
+}
+
 pub(crate) type TypeRef<'tcx> = &'tcx Type<'tcx>;

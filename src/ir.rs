@@ -59,6 +59,7 @@ macro_rules! impl_bits_for {
 
 impl_bits_for!(usize);
 impl_bits_for!(i32);
+impl_bits_for!(u32);
 impl_bits_for!(i64);
 
 impl Bits {
@@ -121,8 +122,12 @@ impl Bits {
         self.value.try_into().unwrap()
     }
 
-    fn as_i64(&self) -> i64 {
-        self.value as i64
+    fn as_i32(&self) -> i32 {
+        self.value as i32
+    }
+
+    fn as_u32(&self) -> u32 {
+        self.value as u32
     }
 }
 
@@ -166,6 +171,7 @@ impl Expression<'_> {
 enum CastType {
     F32ToI32,
     I32ToF32,
+    U32ToF32,
     U32ToI32,
     I32ToU32,
 }
@@ -484,6 +490,7 @@ fn visit_expr<'expr, 'tcx>(
                     match (type_by_expr.of(source_expr), type_by_expr.of(expr)) {
                         (Type::F32, Type::I32) => CastType::F32ToI32,
                         (Type::I32, Type::F32) => CastType::I32ToF32,
+                        (Type::U32, Type::F32) => CastType::U32ToF32,
                         (Type::U32, Type::I32) => CastType::U32ToI32,
                         (Type::I32, Type::U32) => CastType::I32ToU32,
                         (a, b) => todo!("{:?} {:?}", a, b),
@@ -657,7 +664,7 @@ fn visit_item<'expr, 'tcx>(
                                     exprs,
                                     type_by_expr,
                                     &Type::I32,
-                                    Expression::Integer(len.into()),
+                                    Expression::Integer((len as u32).into()),
                                 ),
                                 make_expr(
                                     exprs,
@@ -1096,7 +1103,10 @@ pub(crate) fn execute_ir(
                                     Const::Integer((val as i32).into())
                                 }
                                 (CastType::I32ToF32, Const::Integer(val)) => {
-                                    Const::F32(val.as_i64() as _)
+                                    Const::F32(val.as_i32() as _)
+                                }
+                                (CastType::U32ToF32, Const::Integer(val)) => {
+                                    Const::F32(val.as_u32() as _)
                                 }
                                 (CastType::U32ToI32, Const::Integer(val)) => {
                                     Const::Integer(val.try_into().unwrap())

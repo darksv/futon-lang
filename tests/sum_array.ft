@@ -1,0 +1,9 @@
+fn sum_array(x: u32) -> u32 {
+    let sum: u32 = 0;
+    for it in [1, 2, x] {
+        sum += it;
+    }
+    return sum;
+}
+
+assert sum_array(10) == 13;
