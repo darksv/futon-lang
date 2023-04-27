@@ -37,10 +37,18 @@ impl fmt::Debug for Var {
     }
 }
 
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+enum Signedness {
+    Unsigned,
+    Signed,
+    Unspecified,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Bits {
     value: u64,
     width: u32,
+    sign: Signedness,
 }
 
 macro_rules! impl_bits_for {
@@ -51,6 +59,7 @@ macro_rules! impl_bits_for {
                 Self {
                     value: value as u64,
                     width: <$t>::BITS,
+                    sign: if <$t>::MIN == 0 { Signedness::Unsigned } else { Signedness::Signed },
                 }
             }
         }
@@ -74,47 +83,60 @@ impl Bits {
         }
     }
 
+    #[track_caller]
+    fn check_compatible(&self, other: &Self) {
+        if self.width != other.width || self.sign != other.sign {
+            log::warn!("incompatible types: {:?} {:?}", self, other);
+        }
+    }
+
     fn add(&self, other: &Self) -> Self {
-        assert_eq!(self.width, other.width);
+        self.check_compatible(other);
         Self {
             value: (self.value() + other.value()) as _,
             width: self.width,
+            sign: self.sign,
         }
     }
 
     fn sub(&self, other: &Self) -> Self {
-        assert_eq!(self.width, other.width);
+        self.check_compatible(other);
         Self {
             value: self.value().saturating_sub(other.value()) as _,
             width: self.width,
+            sign: self.sign,
         }
     }
 
     fn mul(&self, other: &Self) -> Self {
-        assert_eq!(self.width, other.width);
+        self.check_compatible(other);
         Self {
             value: (self.value() * other.value()) as _,
             width: self.width,
+            sign: self.sign,
         }
     }
 
     fn div(&self, other: &Self) -> Self {
-        assert_eq!(self.width, other.width);
+        self.check_compatible(other);
         Self {
             value: (self.value() / other.value()) as _,
             width: self.width,
+            sign: self.sign,
         }
     }
 
     fn cmp(&self, other: &Self) -> Ordering {
-        assert_eq!(self.width, other.width);
+        self.check_compatible(other);
         self.value().cmp(&other.value())
     }
 
     fn negate(&self) -> Self {
+        assert_ne!(self.sign, Signedness::Unsigned);
         Self {
             value: (-self.value()) as _,
             width: self.width,
+            sign: self.sign,
         }
     }
 
@@ -299,7 +321,10 @@ pub(crate) fn validate_types(ir: &FunctionIr<'_>) {
 pub(crate) fn dump_ir(ir: &FunctionIr<'_>, f: &mut impl Write) -> io::Result<()> {
     write!(f, "fn {}(", ir.name)?;
     for (idx, it) in ir.defines.iter().enumerate().take(ir.num_args) {
-        write!(f, "_{}: {:?}, ", idx, it.ty)?;
+        write!(f, "_{}: {:?}", idx, it.ty)?;
+        if idx != 0 {
+            write!(f, ", ")?;
+        }
     }
     writeln!(f, ") -> {:?} {{", ir.defines[ir.num_args].ty)?;
 
