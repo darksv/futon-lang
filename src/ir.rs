@@ -170,6 +170,7 @@ pub(crate) enum Const {
     Integer(Bits),
     F32(f32),
     Bool(bool),
+    Pointer(usize),
     Struct,
     Undefined,
 }
@@ -571,13 +572,7 @@ fn visit_item<'expr, 'tcx>(
             expr,
         } => {
             let rhs = visit_expr(&expr, builder, &local_names, block, exprs, type_by_expr);
-            let lhs = match &lhs {
-                Expression::Identifier(ident) => local_names[ident],
-                Expression::Prefix(ast::Operator::Deref, expr) => {
-                    todo!("deref");
-                }
-                _ => unimplemented!(),
-            };
+            let lhs = visit_expr(lhs, builder, &local_names, block, exprs, type_by_expr);
             if let Some(op) = operator {
                 builder.push(block, Instr::BinaryOperation(lhs, *op, lhs, rhs));
             } else {
@@ -966,6 +961,23 @@ pub(crate) fn build_ir<'expr, 'tcx>(
     Err(())
 }
 
+#[derive(Default)]
+struct ExecutionContext {
+    vars: HashMap<Var, Const>,
+    vars_arrays: HashMap<(Var, usize), Const>,
+    memory: Vec<Const>,
+}
+
+impl ExecutionContext {
+    fn insert_value(&mut self, dst: Var, val: Const) {
+        if let Some(Const::Pointer(idx)) = self.vars.get(&dst) {
+            self.memory[*idx] = val;
+        } else {
+            self.vars.insert(dst, val);
+        }
+    }
+}
+
 pub(crate) fn execute_ir(
     ir: &FunctionIr<'_>,
     args: &[Const],
@@ -973,11 +985,10 @@ pub(crate) fn execute_ir(
 ) -> Const {
     let mut curr_block = 0;
     let mut curr_inst = 0;
-    let mut vars: HashMap<Var, Const> = HashMap::new();
-    let mut vars_arrays: HashMap<(Var, usize), Const> = HashMap::new();
 
+    let mut ctx = ExecutionContext::default();
     for (idx, cnst) in args.iter().enumerate().take(ir.num_args) {
-        vars.insert(Var(idx), *cnst);
+       ctx.insert_value(Var(idx), *cnst);
     }
 
     loop {
@@ -985,142 +996,154 @@ pub(crate) fn execute_ir(
             Some(instr) => {
                 match instr {
                     Instr::Const(dst, val) => {
-                        vars.insert(*dst, *val);
+                        ctx.insert_value(*dst, *val);
                     }
                     Instr::Copy(dst, src) => {
-                        match vars.get(src).copied() {
+                        match ctx.vars.get(src).copied() {
                             Some(var) => {
-                                vars.insert(*dst, var);
+                                ctx.insert_value(*dst, var);
 
                                 if let Const::Struct = var {
                                     // Copy all fields
                                     let mut idx = 0;
-                                    while let Some(c) = vars_arrays.get(&(*src, idx)) {
-                                        vars_arrays.insert((*dst, idx), c.clone());
+                                    while let Some(c) = ctx.vars_arrays.get(&(*src, idx)) {
+                                        ctx.vars_arrays.insert((*dst, idx), c.clone());
                                         idx += 1;
                                     }
                                 }
                             }
                             None => {
                                 let mut to_copy = vec![];
-                                for ((var, idx), _) in vars_arrays.iter() {
+                                for ((var, idx), _) in ctx.vars_arrays.iter() {
                                     if var == src {
                                         to_copy.push(*idx);
                                     }
                                 }
 
                                 for to in to_copy {
-                                    vars_arrays.insert((*dst, to), vars_arrays[&(*src, to)]);
+                                    ctx.vars_arrays.insert((*dst, to), ctx.vars_arrays[&(*src, to)]);
                                 }
                             }
                         }
                     }
                     Instr::UnaryOperation(dst, op, a) => {
-                        let val = match (op, vars[a]) {
+                        let val = match (op, ctx.vars[a]) {
                             (ast::Operator::Negate, Const::Integer(v)) => {
                                 Const::Integer(v.negate())
                             }
                             (ast::Operator::Negate, Const::F32(v)) => Const::F32(-v),
-                            (ast::Operator::Ref, _) => {
-                                log::error!("unsupported ref op");
-                                Const::Undefined
+                            (ast::Operator::Ref, val) => {
+                                let idx = ctx.memory.len();
+                                ctx.memory.push(val);
+                                Const::Pointer(idx)
                             }
+                            (ast::Operator::Deref, val) => val,
                             _ => {
                                 unimplemented!("{:?} {:?}", op, a);
                             }
                         };
-                        vars.insert(*dst, val);
+                        ctx.insert_value(*dst, val);
                     }
                     Instr::BinaryOperation(dst, op, a, b) => {
-                        let a = vars.get(a).copied().unwrap_or(Const::Undefined);
-                        let b = vars.get(b).copied().unwrap_or(Const::Undefined);
-                        let val = match (op, a, b) {
-                            (ast::Operator::Add, Const::Integer(a), Const::Integer(b)) => {
-                                Const::Integer(a.add(&b))
-                            }
-                            (ast::Operator::Mul, Const::Integer(a), Const::Integer(b)) => {
-                                Const::Integer(a.mul(&b))
-                            }
-                            (ast::Operator::Sub, Const::Integer(a), Const::Integer(b)) => {
-                                Const::Integer(a.sub(&b))
-                            }
-                            (ast::Operator::Div, Const::Integer(a), Const::Integer(b)) => {
-                                Const::Integer(a.div(&b))
-                            }
-                            (ast::Operator::Less, Const::Integer(a), Const::Integer(b)) => {
-                                Const::Bool(a.cmp(&b).is_lt())
-                            }
-                            (ast::Operator::Greater, Const::Integer(a), Const::Integer(b)) => {
-                                Const::Bool(a.cmp(&b).is_gt())
-                            }
-                            (ast::Operator::Equal, Const::Integer(a), Const::Integer(b)) => {
-                                Const::Bool(a.cmp(&b).is_eq())
-                            }
-                            (ast::Operator::NotEqual, Const::Integer(a), Const::Integer(b)) => {
-                                Const::Bool(a.cmp(&b).is_ne())
-                            }
-                            (ast::Operator::LessEqual, Const::Integer(a), Const::Integer(b)) => {
-                                Const::Bool(a.cmp(&b).is_le())
-                            }
-                            (ast::Operator::GreaterEqual, Const::Integer(a), Const::Integer(b)) => {
-                                Const::Bool(a.cmp(&b).is_ge())
-                            }
+                        fn arithmetic_operation(op: ast::Operator, a: Const, b: Const) -> Option<Const> {
+                            Some(match (op, a, b) {
+                                (ast::Operator::Add, Const::Integer(a), Const::Integer(b)) => {
+                                    Const::Integer(a.add(&b))
+                                }
+                                (ast::Operator::Mul, Const::Integer(a), Const::Integer(b)) => {
+                                    Const::Integer(a.mul(&b))
+                                }
+                                (ast::Operator::Sub, Const::Integer(a), Const::Integer(b)) => {
+                                    Const::Integer(a.sub(&b))
+                                }
+                                (ast::Operator::Div, Const::Integer(a), Const::Integer(b)) => {
+                                    Const::Integer(a.div(&b))
+                                }
+                                (ast::Operator::Less, Const::Integer(a), Const::Integer(b)) => {
+                                    Const::Bool(a.cmp(&b).is_lt())
+                                }
+                                (ast::Operator::Greater, Const::Integer(a), Const::Integer(b)) => {
+                                    Const::Bool(a.cmp(&b).is_gt())
+                                }
+                                (ast::Operator::Equal, Const::Integer(a), Const::Integer(b)) => {
+                                    Const::Bool(a.cmp(&b).is_eq())
+                                }
+                                (ast::Operator::NotEqual, Const::Integer(a), Const::Integer(b)) => {
+                                    Const::Bool(a.cmp(&b).is_ne())
+                                }
+                                (ast::Operator::LessEqual, Const::Integer(a), Const::Integer(b)) => {
+                                    Const::Bool(a.cmp(&b).is_le())
+                                }
+                                (ast::Operator::GreaterEqual, Const::Integer(a), Const::Integer(b)) => {
+                                    Const::Bool(a.cmp(&b).is_ge())
+                                }
 
-                            (ast::Operator::Add, Const::F32(a), Const::F32(b)) => Const::F32(a + b),
-                            (ast::Operator::Mul, Const::F32(a), Const::F32(b)) => Const::F32(a * b),
-                            (ast::Operator::Sub, Const::F32(a), Const::F32(b)) => Const::F32(a - b),
-                            (ast::Operator::Div, Const::F32(a), Const::F32(b)) => Const::F32(a / b),
-                            (ast::Operator::Less, Const::F32(a), Const::F32(b)) => {
-                                Const::Bool(a < b)
-                            }
-                            (ast::Operator::Greater, Const::F32(a), Const::F32(b)) => {
-                                Const::Bool(a > b)
-                            }
-                            (ast::Operator::Equal, Const::F32(a), Const::F32(b)) => {
-                                Const::Bool(a == b)
-                            }
-                            (ast::Operator::NotEqual, Const::F32(a), Const::F32(b)) => {
-                                Const::Bool(a != b)
-                            }
-                            (ast::Operator::LessEqual, Const::F32(a), Const::F32(b)) => {
-                                Const::Bool(a <= b)
-                            }
-                            (ast::Operator::GreaterEqual, Const::F32(a), Const::F32(b)) => {
-                                Const::Bool(a >= b)
-                            }
+                                (ast::Operator::Add, Const::F32(a), Const::F32(b)) => Const::F32(a + b),
+                                (ast::Operator::Mul, Const::F32(a), Const::F32(b)) => Const::F32(a * b),
+                                (ast::Operator::Sub, Const::F32(a), Const::F32(b)) => Const::F32(a - b),
+                                (ast::Operator::Div, Const::F32(a), Const::F32(b)) => Const::F32(a / b),
+                                (ast::Operator::Less, Const::F32(a), Const::F32(b)) => {
+                                    Const::Bool(a < b)
+                                }
+                                (ast::Operator::Greater, Const::F32(a), Const::F32(b)) => {
+                                    Const::Bool(a > b)
+                                }
+                                (ast::Operator::Equal, Const::F32(a), Const::F32(b)) => {
+                                    Const::Bool(a == b)
+                                }
+                                (ast::Operator::NotEqual, Const::F32(a), Const::F32(b)) => {
+                                    Const::Bool(a != b)
+                                }
+                                (ast::Operator::LessEqual, Const::F32(a), Const::F32(b)) => {
+                                    Const::Bool(a <= b)
+                                }
+                                (ast::Operator::GreaterEqual, Const::F32(a), Const::F32(b)) => {
+                                    Const::Bool(a >= b)
+                                }
+                                _ => return None,
+                            })
+                        }
 
-                            (op, Const::Undefined, _) => {
-                                log::warn!(
-                                    "Propagating undefined value for {a:?} {op:?} {b:?} from {a:?}"
-                                );
-                                Const::Undefined
-                            }
-                            (op, _, Const::Undefined) => {
-                                log::warn!(
-                                    "Propagating undefined value for {a:?} {op:?} {b:?} from {b:?}"
-                                );
-                                Const::Undefined
-                            }
-                            (op, a, b) => {
-                                log::warn!("Missing operation for {a:?} {op:?} {b:?}");
-                                Const::Undefined
-                            }
+                        let a = ctx.vars.get(a).copied().unwrap_or(Const::Undefined);
+                        let b = ctx.vars.get(b).copied().unwrap_or(Const::Undefined);
+                        let val = match arithmetic_operation(*op, a, b) {
+                            Some(x) => x,
+                            None => match (op, a, b) {
+                                (op, a, Const::Pointer(b)) => {
+                                    arithmetic_operation(*op, a, ctx.memory[b]).unwrap_or(Const::Undefined)
+                                }
+                                (op, Const::Pointer(a), b) => {
+                                    arithmetic_operation(*op, ctx.memory[a], b).unwrap_or(Const::Undefined)
+                                }
+                                (op, Const::Undefined, _) => {
+                                    log::warn!("Propagating undefined value for {a:?} {op:?} {b:?} from {a:?}");
+                                    Const::Undefined
+                                }
+                                (op, _, Const::Undefined) => {
+                                    log::warn!("Propagating undefined value for {a:?} {op:?} {b:?} from {b:?}");
+                                    Const::Undefined
+                                }
+                                (op, a, b) => {
+                                    log::warn!("Missing operation for {a:?} {op:?} {b:?}");
+                                    Const::Undefined
+                                }
+                            },
                         };
-                        vars.insert(*dst, val);
+                        ctx.insert_value(*dst, val);
                     }
                     Instr::SetElement(arr, index, val) => {
-                        vars_arrays.insert((*arr, *index), vars[val]);
+                        ctx.vars_arrays.insert((*arr, *index), ctx.vars[val]);
                     }
                     Instr::GetElement(var, arr, index) => {
-                        let index = match vars[index] {
+                        let index = match ctx.vars[index] {
                             Const::Integer(v) => v.as_usize(),
                             other => unimplemented!("{:?}", other),
                         };
-                        vars.insert(*var, vars_arrays[&(*arr, index)]);
+                        ctx.insert_value(*var, ctx.vars_arrays[&(*arr, index)]);
                     }
                     Instr::Cast(target, source, mode) => {
-                        let source = vars.get(source).copied().unwrap_or(Const::Undefined);
-                        vars.insert(
+                        let source = ctx.vars.get(source).copied().unwrap_or(Const::Undefined);
+                        ctx.insert_value(
                             *target,
                             match (mode, source) {
                                 (_, Const::Undefined) => Const::Undefined,
@@ -1143,23 +1166,23 @@ pub(crate) fn execute_ir(
                     Instr::Call(target, name, args) => match name.as_str() {
                         "intrinsic.debug" => {
                             assert_eq!(args.len(), 1);
-                            let value = vars[&args[0]];
+                            let value = ctx.vars[&args[0]];
                             log::debug!("Debug value: {:?}", &value);
-                            vars.insert(*target, value);
+                            ctx.insert_value(*target, value);
                         }
                         name => {
                             let func = &functions[name];
-                            let args: Vec<_> = args.iter().map(|it| vars[it]).collect();
+                            let args: Vec<_> = args.iter().map(|it| ctx.vars[it]).collect();
                             let result = execute_ir(func, &args, functions);
-                            vars.insert(*target, result);
+                            ctx.insert_value(*target, result);
                         }
                     },
                     Instr::SetField(lhs, idx, rhs) => {
-                        vars_arrays.insert((*lhs, *idx), vars[rhs]);
-                        vars.insert(*lhs, Const::Struct);
+                        ctx.vars_arrays.insert((*lhs, *idx), ctx.vars[rhs]);
+                        ctx.insert_value(*lhs, Const::Struct);
                     }
                     Instr::GetField(target, lhs, idx) => {
-                        vars.insert(*target, vars_arrays.get(&(*lhs, *idx)).cloned().unwrap());
+                        ctx.insert_value(*target, ctx.vars_arrays.get(&(*lhs, *idx)).cloned().unwrap());
                     }
                 }
                 curr_inst += 1;
@@ -1169,7 +1192,7 @@ pub(crate) fn execute_ir(
                     curr_block = block.0;
                     curr_inst = 0;
                 }
-                Terminator::JumpIf(var, if_true, if_else) => match vars[&var] {
+                Terminator::JumpIf(var, if_true, if_else) => match ctx.vars[&var] {
                     Const::Bool(v) => {
                         curr_block = if v { if_true.0 } else { if_else.0 };
                         curr_inst = 0;
@@ -1181,7 +1204,8 @@ pub(crate) fn execute_ir(
                     other => unimplemented!("{:?}", other),
                 },
                 Terminator::Return => {
-                    return match vars.get(&Var(ir.num_args)) {
+                    return match ctx.vars.get(&Var(ir.num_args)) {
+                        Some(Const::Pointer(x)) => ctx.memory[*x],
                         Some(x) => *x,
                         None => Const::Undefined,
                     };
@@ -1190,7 +1214,7 @@ pub(crate) fn execute_ir(
                     log::warn!("executing unreachable");
                     return Const::Undefined;
                 }
-                Terminator::Assert(var, block) => match vars[&var] {
+                Terminator::Assert(var, block) => match ctx.vars[&var] {
                     Const::Bool(true) => {
                         curr_block = block.0;
                         curr_inst = 0;

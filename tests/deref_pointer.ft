@@ -1,4 +1,9 @@
-fn test_ptr() {
+fn test_ptr() -> i32 {
     let a: *i32 = &123;
-    *a += 1;
+    let b: i32 = 1;
+    *a += b;
+
+    return *a;
 }
+
+assert test_ptr() == 124;

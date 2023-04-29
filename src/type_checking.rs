@@ -12,6 +12,7 @@ fn is_coercible_to(ty: TypeRef<'_>, target: TypeRef<'_>) -> bool {
         (Type::Integer, Type::I32 | Type::U32) => true,
         (Type::Float, Type::F32) => true,
         (Type::Array(a, x), Type::Array(b, y)) => a == b && is_coercible_to(x, y),
+        (Type::Pointer(x), Type::Pointer(y)) => is_coercible_to(x, y),
         _ => false,
     }
 }
@@ -185,6 +186,7 @@ impl<'tcx> ExprToType<'tcx> {
             Type::Unknown => panic!("coercion failed??"),
             other if is_coercible_to(other, ty) => {
                 self.try_insert(expr, ty);
+                log::debug!("coerced to {:?}", ty);
                 true
             }
             _ => false,
@@ -282,18 +284,19 @@ where
                     }
                     ast::Operator::Deref => match self.type_by_expr.of(inner) {
                         Type::Pointer(inner) => inner,
-                        _ => unimplemented!(),
+                        other => unimplemented!("deref of {:?}", other),
                     },
                     _ => self.type_by_expr.of(inner),
                 };
                 (Expression::Prefix(*op, inner), ty)
             }
             ast::Expression::Identifier(ident) => {
-                let ty = if let Some(ty) = self.locals.get(ident.as_str()) {
-                    ty
-                } else {
-                    log::debug!("no local {:?}", ident);
-                    self.arena.alloc(Type::Error)
+                let ty = match self.locals.get(ident.as_str()) {
+                    Some(ty) => ty,
+                    None => {
+                        log::debug!("no local {:?}", ident);
+                        self.arena.alloc(Type::Error)
+                    }
                 };
                 (Expression::Identifier(ident.to_string()), ty)
             }
@@ -481,7 +484,6 @@ where
         expected_ret_ty: Option<TypeRef<'tcx>>,
     ) -> Vec<Item<'expr, 'tcx>> {
         let mut lowered_items = Vec::new();
-
         for item in items.iter() {
             let item = match item {
                 ast::Item::Let {
@@ -524,16 +526,23 @@ where
                     }
                 }
                 ast::Item::Assignment {
-                    lhs,
+                    lhs: lhs_expr,
                     operator,
-                    expr,
+                    expr: rhs_expr,
                 } => {
-                    let lhs = self.deduce_expr_ty(lhs);
-                    let rhs = self.deduce_expr_ty(expr);
+                    let lhs = self.deduce_expr_ty(lhs_expr);
+                    let rhs = self.deduce_expr_ty(rhs_expr);
 
                     if is_compatible_to(self.type_by_expr.of(lhs), self.type_by_expr.of(rhs))
                         || self.type_by_expr.try_coerce_any(lhs, rhs)
                     {
+                        match lhs_expr {
+                            ast::Expression::Identifier(name) => {
+                                self.locals.insert(name, self.type_by_expr.of(rhs));
+                            }
+                            _ => (),
+                        }
+
                         //
                     } else {
                         log::debug!(
