@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::io::Write;
 use std::{fmt, io};
+use std::fmt::{Debug, Formatter, write};
 
 use crate::type_checking::{ExprRef, ExprToType, Expression, Item};
 use crate::types::{Type, TypeRef};
@@ -44,11 +45,24 @@ enum Signedness {
     Unspecified,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 pub(crate) struct Bits {
     value: u64,
     width: u32,
     sign: Signedness,
+}
+
+impl Debug for Bits {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.value)?;
+        write!(f, "_{}", match self.sign {
+            Signedness::Unsigned => "u",
+            Signedness::Signed => "i",
+            Signedness::Unspecified => "?"
+        })?;
+        write!(f, "{}", self.width)?;
+        Ok(())
+    }
 }
 
 macro_rules! impl_bits_for {
