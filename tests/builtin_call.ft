@@ -1,3 +1,5 @@
 fn main() {
-    debug(123);
+    return debug(123);
 }
+
+assert main() == 123;
