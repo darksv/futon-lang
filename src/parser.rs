@@ -211,10 +211,7 @@ impl<'lex, 'arena> Parser<'lex, 'arena> where 'lex: 'arena {
             }
 
             let next = match token.get_type() {
-                TokenType::Punct('+')
-                | TokenType::Punct('-')
-                | TokenType::Punct('*')
-                | TokenType::Punct('/') => {
+                TokenType::Punct('+' | '-' | '*' | '/') => {
                     if self.peek(1).get_type() == TokenType::Punct('=') {
                         break;
                     }
@@ -235,10 +232,7 @@ impl<'lex, 'arena> Parser<'lex, 'arena> where 'lex: 'arena {
                     let rhs = self.parse_expr_ref(new_precedence)?;
                     ast::Expression::Place(self.arena.alloc(expr), rhs)
                 }
-                TokenType::Punct('<')
-                | TokenType::Punct('>')
-                | TokenType::Punct('!')
-                | TokenType::Punct('=') => {
+                TokenType::Punct('<' | '>' | '!' | '=') => {
                     let first = self.peek(0);
                     let second = self.peek(1);
                     let is_joint = match first.as_punct() {
