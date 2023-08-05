@@ -444,7 +444,7 @@ impl<'a> Lexer<'a> {
             is_floating = true;
         }
         let has_exponent = match self.peek(0) {
-            Some('e') | Some('E') => {
+            Some('e' | 'E') => {
                 self.advance().unwrap();
                 true
             }
@@ -452,7 +452,7 @@ impl<'a> Lexer<'a> {
         };
         if has_exponent {
             match self.peek(0) {
-                Some('+') | Some('-') => {
+                Some('+' | '-') => {
                     self.advance().unwrap();
                 }
                 _ => (),

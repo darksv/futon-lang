@@ -132,7 +132,7 @@ impl<'lex, 'arena> Parser<'lex, 'arena> where 'lex: 'arena {
     fn parse_expr_opt(&mut self, precedence: isize) -> ParseResult<Option<ast::Expression<'arena>>> {
         let token = self.peek(0);
         let lhs = match token.get_type() {
-            TokenType::Punct('-') | TokenType::Punct('&') | TokenType::Punct('*') => {
+            TokenType::Punct('-' | '&' | '*') => {
                 self.advance();
                 let op = match token.get_type() {
                     TokenType::Punct('-') => ast::Operator::Negate,
