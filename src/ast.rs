@@ -43,26 +43,26 @@ pub(crate) enum Operator {
     As,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) enum Expression {
+#[derive(Debug)]
+pub(crate) enum Expression<'a> {
     Identifier(String),
     Integer(i64),
     Float(f64),
     Bool(bool),
-    Prefix(Operator, Box<Expression>),
-    Infix(Operator, Box<Expression>, Box<Expression>),
-    Place(Box<Expression>, Box<Expression>),
-    Array(Vec<Expression>),
-    Tuple(Vec<Expression>),
-    Call(Box<Expression>, Vec<Expression>),
-    Range(Box<Expression>, Option<Box<Expression>>),
-    Index(Box<Expression>, Box<Expression>),
-    Cast(Box<Expression>, Type),
+    Prefix(Operator, &'a Expression<'a>),
+    Infix(Operator, &'a Expression<'a>, &'a Expression<'a>),
+    Place(&'a Expression<'a>, &'a Expression<'a>),
+    Array(&'a [Expression<'a>]),
+    Tuple(&'a [Expression<'a>]),
+    Call(&'a Expression<'a>, &'a [Expression<'a>]),
+    Range(&'a Expression<'a>, Option<&'a Expression<'a>>),
+    Index(&'a Expression<'a>, &'a Expression<'a>),
+    Cast(&'a Expression<'a>, Type),
     Var(Var),
-    StructLiteral(Option<String>, Vec<(String, Expression)>),
+    StructLiteral(Option<String>, Vec<(String, &'a Expression<'a>)>),
 }
 
-impl Expression {
+impl Expression<'_> {
     pub(crate) fn as_str(&self) -> Option<&str> {
         match self {
             Expression::Identifier(s) => Some(s),
@@ -72,47 +72,47 @@ impl Expression {
 }
 
 #[derive(Debug)]
-pub(crate) enum Item {
+pub(crate) enum Item<'a> {
     Let {
         name: String,
         r#type: Option<Type>,
-        expr: Option<Expression>,
+        expr: Option<&'a Expression<'a>>,
     },
     Assignment {
-        lhs: Expression,
+        lhs: &'a Expression<'a>,
         operator: Option<Operator>,
-        expr: Expression,
+        expr: &'a Expression<'a>,
     },
     Expr {
-        expr: Expression,
+        expr: &'a Expression<'a>,
     },
     Function {
         name: String,
         is_extern: bool,
         params: Vec<Argument>,
         ty: Type,
-        body: Vec<Item>,
+        body: Vec<Item<'a>>,
     },
     Struct {
         name: String,
         fields: Vec<Field>,
     },
     If {
-        condition: Expression,
-        arm_true: Vec<Item>,
-        arm_false: Option<Vec<Item>>,
+        condition: &'a Expression<'a>,
+        arm_true: Vec<Item<'a>>,
+        arm_false: Option<Vec<Item<'a>>>,
     },
     ForIn {
         name: String,
-        expr: Expression,
-        body: Vec<Item>,
+        expr: &'a Expression<'a>,
+        body: Vec<Item<'a>>,
     },
     Loop {
-        body: Vec<Item>,
+        body: Vec<Item<'a>>,
     },
     Break,
-    Yield(Box<Expression>),
-    Return(Box<Expression>),
-    Block(Vec<Item>),
-    Assert(Box<Expression>),
+    Yield(Box<&'a Expression<'a>>),
+    Return(Box<&'a Expression<'a>>),
+    Block(Vec<Item<'a>>),
+    Assert(Box<&'a Expression<'a>>),
 }

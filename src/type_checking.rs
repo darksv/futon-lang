@@ -325,7 +325,7 @@ where
 
                 let mut values = Vec::new();
                 let mut first_specific_type = None;
-                for item in items {
+                for item in *items {
                     let expr = self.deduce_expr_ty(&item);
                     values.push(expr);
                     let ty = self.type_by_expr.of(expr);
@@ -355,7 +355,7 @@ where
                     self.arena.alloc(Type::Array(items.len(), item_ty)),
                 )
             }
-            ast::Expression::Call(callee, args) => match callee.as_ref() {
+            ast::Expression::Call(callee, args) => match callee {
                 ast::Expression::Identifier(ident) => {
                     let callee = match ident.as_str() {
                         "debug" => {
@@ -376,7 +376,7 @@ where
                     let (args_ty, ret_ty) = match self.type_by_expr.of(callee) {
                         Type::Function(args_ty, ret_ty) => (args_ty, ret_ty),
                         _ => {
-                            log::debug!("{} is not callable", ident.as_str());
+                            log::debug!("{} is not callable", ident);
                             return self
                                 .make_expr(self.arena.alloc(Type::Error), Expression::Error);
                         }
@@ -431,7 +431,7 @@ where
                 let mut values = Vec::new();
                 let mut types = Vec::new();
 
-                for value in items {
+                for value in *items {
                     let expr = self.deduce_expr_ty(value);
                     types.push(self.type_by_expr.of(expr));
                     values.push(expr);

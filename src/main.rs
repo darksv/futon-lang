@@ -57,7 +57,8 @@ fn compile_file(path: impl AsRef<Path>) -> bool {
 
     let lex = Lexer::from_source(&content);
     let arena = Arena::default();
-    let mut parser = Parser::new(lex);
+    let arena2 = Arena::default();
+    let mut parser = Parser::new(lex, &arena2);
     match parser.parse() {
         Ok(mut items) => {
             let mut tc_ctx = TypeCheckerContext {

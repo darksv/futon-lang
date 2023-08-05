@@ -159,7 +159,7 @@ impl<'a> Token<'a> {
     }
 
     /// Returns a raw slice over the meaningful string value of the token
-    pub fn as_slice(&'a self) -> &'a str {
+    pub fn as_str(&'a self) -> &'a str {
         match self.value {
             TokenValue::String(ref s) => &s[..],
             _ => self.get_span().as_slice(),
@@ -168,7 +168,7 @@ impl<'a> Token<'a> {
 
     /// Returns an owned string over the meaningful string value of the token
     pub fn as_string(&self) -> String {
-        self.as_slice().to_owned()
+        self.as_str().to_owned()
     }
 }
 

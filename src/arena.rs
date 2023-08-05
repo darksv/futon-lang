@@ -41,6 +41,12 @@ impl<T> Arena<T> {
         }
     }
 
+    pub fn alloc_many<'a>(&self, value: impl ExactSizeIterator<Item=T>) -> &'a [T] {
+        let items: Vec<_> = value.collect();
+        // TODO: alloc in arena
+        Box::leak(items.into_boxed_slice())
+    }
+
     pub fn find(&self, other: &T) -> Option<&T>
     where
         T: Eq,
