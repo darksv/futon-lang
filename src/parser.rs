@@ -101,7 +101,7 @@ impl<'lex, 'arena> Parser<'lex, 'arena> where 'lex: 'arena {
 
     fn parse_assign_or_expr(&mut self, lhs: ast::Expression<'arena>) -> ParseResult<ast::Item<'arena>> {
         let lhs = self.arena.alloc(lhs);
-        let item = if self.match_many(&['+', '=']) {
+        let item = if self.match_many(['+', '=']) {
             ast::Item::Assignment {
                 lhs,
                 operator: Some(ast::Operator::Add),
@@ -398,7 +398,7 @@ impl<'lex, 'arena> Parser<'lex, 'arena> where 'lex: 'arena {
         }
         self.expect_one(')')?;
 
-        let ty = if self.match_many(&['-', '>']) {
+        let ty = if self.match_many(['-', '>']) {
             self.parse_ty()?
         } else {
             ast::Type::Unit
@@ -473,7 +473,7 @@ impl<'lex, 'arena> Parser<'lex, 'arena> where 'lex: 'arena {
                 self.expect_one('(')?;
                 let args = self.parse_ty_tuple()?;
 
-                let ret = if self.match_many(&['-', '>']) {
+                let ret = if self.match_many(['-', '>']) {
                     self.parse_ty()?
                 } else {
                     ast::Type::Unit
@@ -637,7 +637,7 @@ impl<'lex, 'arena> Parser<'lex, 'arena> where 'lex: 'arena {
     }
 
     #[inline]
-    fn match_many(&mut self, chars: &[char]) -> bool {
+    fn match_many<const N: usize>(&mut self, chars: [char; N]) -> bool {
         for (index, &expected) in chars.iter().enumerate() {
             if let Some((actual, kind)) = self.peek(index).as_punct() {
                 if actual != expected {
