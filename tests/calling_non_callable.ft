@@ -1,4 +1,6 @@
 fn main() {
     let a = 123;
-    a(123);
+    return a(123);
 }
+
+assert main() == 123;
