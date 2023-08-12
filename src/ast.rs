@@ -1,3 +1,4 @@
+use crate::index_arena::{Handle, Many};
 use crate::ir::Var;
 use crate::lexer::SourceSpan;
 use crate::types::TypeRef;
@@ -46,75 +47,75 @@ pub(crate) enum Operator {
 }
 
 #[derive(Debug)]
-pub(crate) enum Expression<'a> {
+pub(crate) enum Expr {
     Identifier(String),
     Integer(i64),
     Float(f64),
     Bool(bool),
-    Prefix(Operator, &'a Expression<'a>),
-    Infix(Operator, &'a Expression<'a>, &'a Expression<'a>),
-    Place(&'a Expression<'a>, &'a Expression<'a>),
-    Array(&'a [Expression<'a>]),
-    Tuple(&'a [Expression<'a>]),
-    Call(&'a Expression<'a>, &'a [Expression<'a>]),
-    Range(&'a Expression<'a>, Option<&'a Expression<'a>>),
-    Index(&'a Expression<'a>, &'a Expression<'a>),
-    Cast(&'a Expression<'a>, Type),
+    Prefix(Operator, Handle<Expr>),
+    Infix(Operator, Handle<Expr>, Handle<Expr>),
+    Place(Handle<Expr>, Handle<Expr>),
+    Array(Handle<Expr, Many>),
+    Tuple(Handle<Expr, Many>),
+    Call(Handle<Expr>, Handle<Expr, Many>),
+    Range(Handle<Expr>, Option<Handle<Expr>>),
+    Index(Handle<Expr>, Handle<Expr>),
+    Cast(Handle<Expr>, Type),
     Var(Var),
-    StructLiteral(Option<String>, Vec<(String, &'a Expression<'a>)>),
+    StructLiteral(Option<String>, Vec<(String, Handle<Expr>)>),
 }
 
-impl Expression<'_> {
+impl Expr {
     pub(crate) fn as_str(&self) -> Option<&str> {
         match self {
-            Expression::Identifier(s) => Some(s),
+            Expr::Identifier(s) => Some(s),
             _ => None,
         }
     }
 }
 
 #[derive(Debug)]
-pub(crate) enum Item<'a> {
+pub(crate) enum Item {
     Let {
         name: String,
         r#type: Option<Type>,
-        expr: Option<&'a Expression<'a>>,
+        expr: Option<Handle<Expr>>,
     },
     Assignment {
-        lhs: &'a Expression<'a>,
+        lhs: Handle<Expr>,
         operator: Option<Operator>,
-        expr: &'a Expression<'a>,
+        expr: Handle<Expr>,
     },
     Expr {
-        expr: &'a Expression<'a>,
+        expr: Handle<Expr>,
     },
     Function {
         name: String,
         is_extern: bool,
         params: Vec<Argument>,
         ty: Type,
-        body: Vec<Item<'a>>,
+        body: Vec<Item>,
     },
     Struct {
         name: String,
         fields: Vec<Field>,
     },
     If {
-        condition: &'a Expression<'a>,
-        arm_true: Vec<Item<'a>>,
-        arm_false: Option<Vec<Item<'a>>>,
+        condition: Handle<Expr>,
+        arm_true: Vec<Item>,
+        arm_false: Option<Vec<Item>>,
     },
     ForIn {
         name: String,
-        expr: &'a Expression<'a>,
-        body: Vec<Item<'a>>,
+        expr: Handle<Expr>,
+        body: Vec<Item>,
     },
     Loop {
-        body: Vec<Item<'a>>,
+        body: Vec<Item>,
     },
     Break,
-    Yield(Box<&'a Expression<'a>>),
-    Return(Box<&'a Expression<'a>>),
-    Block(Vec<Item<'a>>),
-    Assert(Box<&'a Expression<'a>>),
+    Yield(Box<Handle<Expr>>),
+    Return(Box<Handle<Expr>>),
+    Block(Vec<Item>),
+    Assert(Box<Handle<Expr>>),
 }

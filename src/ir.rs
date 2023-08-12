@@ -680,7 +680,7 @@ fn visit_item<'expr, 'tcx>(
                     Item::Let {
                         name: items_id.clone(),
                         ty: expr_ty,
-                        expr: Some(expr.clone()),
+                        expr: Some(expr),
                     },
                     Item::Let {
                         name: index_id.clone(),

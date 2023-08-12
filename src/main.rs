@@ -2,20 +2,22 @@
 #![allow(clippy::match_like_matches_macro)]
 #![allow(unused)]
 
-extern crate core;
 
-use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::env;
 use std::path::Path;
+
+use indexmap::IndexMap;
 
 use lexer::{Keyword, Lexer, PunctKind, Token, TokenType};
 use parser::Parser;
 
 use crate::arena::Arena;
+use crate::ast::Expr::Index;
 use crate::ast::Operator;
-use crate::ir::{build_ir, dump_ir, execute_ir, validate_types, Const};
-use crate::type_checking::{ExprToType, Expression, Item, TypeCheckerContext};
+use crate::index_arena::IndexArena;
+use crate::ir::{build_ir, Const, dump_ir, execute_ir, validate_types};
+use crate::type_checking::{Expression, ExprToType, Item, TypeCheckerContext};
 
 mod arena;
 mod ast;
@@ -25,6 +27,7 @@ mod multi_peek;
 mod parser;
 mod type_checking;
 mod types;
+mod index_arena;
 
 fn main() {
     env_logger::init();
@@ -47,8 +50,10 @@ fn main() {
 
 fn run_test(path: impl AsRef<Path>) -> bool {
     let path = path.as_ref();
-    print!("Testing {} --- ", path.display());
-    std::panic::catch_unwind(|| compile_file(path)).unwrap_or(false)
+    print!(">>> START: {} <<<\n", path.display());
+    let res = std::panic::catch_unwind(|| compile_file(path)).unwrap_or(false);
+    print!("<<< END <<<");
+    res
 }
 
 fn compile_file(path: impl AsRef<Path>) -> bool {
@@ -57,8 +62,8 @@ fn compile_file(path: impl AsRef<Path>) -> bool {
 
     let lex = Lexer::from_source(&content);
     let arena = Arena::default();
-    let arena2 = Arena::default();
-    let mut parser = Parser::new(lex, &arena2);
+    let mut arena2 = IndexArena::default();
+    let mut parser = Parser::new(lex, &mut arena2);
     match parser.parse() {
         Ok(mut items) => {
             let mut tc_ctx = TypeCheckerContext {
@@ -66,6 +71,7 @@ fn compile_file(path: impl AsRef<Path>) -> bool {
                 locals: HashMap::new(),
                 defined_types: HashMap::new(),
                 exprs: &Arena::default(),
+                ast_expr_arena: &arena2,
                 type_by_expr: ExprToType::new(),
             };
 

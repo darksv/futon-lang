@@ -4,6 +4,7 @@ use std::ptr::addr_of;
 
 use crate::arena::Arena;
 use crate::ast;
+use crate::index_arena::{Handle, IndexArena};
 use crate::ir::{Bits, Var};
 use crate::types::{Type, TypeRef};
 
@@ -220,6 +221,7 @@ pub(crate) struct TypeCheckerContext<'tcx, 'expr, 'ast> {
     pub(crate) arena: &'tcx Arena<Type<'tcx>>,
     pub(crate) locals: HashMap<&'ast str, TypeRef<'tcx>>,
     pub(crate) defined_types: HashMap<&'expr str, TypeRef<'tcx>>,
+    pub(crate) ast_expr_arena: &'ast IndexArena<ast::Expr>,
     pub(crate) exprs: &'expr Arena<Expression<'expr>>,
     pub(crate) type_by_expr: ExprToType<'tcx>,
 }
@@ -234,16 +236,16 @@ where
         expr
     }
 
-    fn deduce_expr_ty(&mut self, expr: &ast::Expression) -> ExprRef<'expr> {
-        let (expr, ty) = match expr {
-            ast::Expression::Bool(val) => (Expression::Bool(*val), self.arena.alloc(Type::Bool)),
-            ast::Expression::Integer(val) => (
+    fn deduce_expr_ty(&mut self, expr: &Handle<ast::Expr>) -> ExprRef<'expr> {
+        let (expr, ty) = match self.ast_expr_arena.resolve(*expr) {
+            ast::Expr::Bool(val) => (Expression::Bool(*val), self.arena.alloc(Type::Bool)),
+            ast::Expr::Integer(val) => (
                 // FIXME: type
                 Expression::Integer((*val as i32).into()),
                 self.arena.alloc(Type::Integer),
             ),
-            ast::Expression::Float(val) => (Expression::Float(*val), self.arena.alloc(Type::Float)),
-            ast::Expression::Infix(op, lhs, rhs) => {
+            ast::Expr::Float(val) => (Expression::Float(*val), self.arena.alloc(Type::Float)),
+            ast::Expr::Infix(op, lhs, rhs) => {
                 let lhs = self.deduce_expr_ty(lhs);
                 let rhs = self.deduce_expr_ty(rhs);
                 let ty = if is_compatible_to(self.type_by_expr.of(lhs), self.type_by_expr.of(rhs))
@@ -278,7 +280,7 @@ where
 
                 (Expression::Infix(*op, lhs, rhs), ty)
             }
-            ast::Expression::Prefix(op, expr) => {
+            ast::Expr::Prefix(op, expr) => {
                 let inner = self.deduce_expr_ty(expr);
                 let ty = match op {
                     ast::Operator::Ref => {
@@ -292,7 +294,7 @@ where
                 };
                 (Expression::Prefix(*op, inner), ty)
             }
-            ast::Expression::Identifier(ident) => {
+            ast::Expr::Identifier(ident) => {
                 let ty = match self.locals.get(ident.as_str()) {
                     Some(ty) => ty,
                     None => {
@@ -302,7 +304,8 @@ where
                 };
                 (Expression::Identifier(ident.to_string()), ty)
             }
-            ast::Expression::Place(expr, field) => {
+            ast::Expr::Place(expr, field) => {
+                let field = self.ast_expr_arena.resolve(*field);
                 let lhs = self.deduce_expr_ty(expr);
 
                 let Some(name) = field.as_str() else {
@@ -320,7 +323,7 @@ where
 
                 (Expression::Field(lhs, idx), *ty)
             }
-            ast::Expression::Array(items) => {
+            ast::Expr::Array(items) => {
                 if items.is_empty() {
                     return self.make_expr(self.arena.alloc(Type::Unknown), Expression::Error);
                 }
@@ -357,8 +360,8 @@ where
                     self.arena.alloc(Type::Array(items.len(), item_ty)),
                 )
             }
-            ast::Expression::Call(callee, args) => match callee {
-                ast::Expression::Identifier(ident) => {
+            ast::Expr::Call(callee, args) => match self.ast_expr_arena.resolve(*callee) {
+                ast::Expr::Identifier(ident) => {
                     let callee = match ident.as_str() {
                         "debug" => {
                             let ty = self
@@ -386,8 +389,8 @@ where
 
                     let mut values = Vec::new();
 
-                    for (arg, expected_ty) in args.iter().zip(args_ty) {
-                        let arg = self.deduce_expr_ty(arg);
+                    for (arg, expected_ty) in args.into_iter().zip(args_ty) {
+                        let arg = self.deduce_expr_ty(&arg);
 
                         if is_compatible_to(self.type_by_expr.of(arg), expected_ty)
                             || self.type_by_expr.try_coerce(arg, expected_ty)
@@ -410,7 +413,7 @@ where
                 }
                 expr => unimplemented!("{:?}", expr),
             },
-            ast::Expression::Range(from, Some(to)) => {
+            ast::Expr::Range(from, Some(to)) => {
                 let from = self.deduce_expr_ty(from);
                 let to = self.deduce_expr_ty(to);
                 if is_compatible_to(self.type_by_expr.of(from), self.type_by_expr.of(to))
@@ -426,15 +429,15 @@ where
                     self.arena.alloc(Type::Range),
                 )
             }
-            ast::Expression::Range(to, None) => {
+            ast::Expr::Range(to, None) => {
                 unimplemented!()
             }
-            ast::Expression::Tuple(items) => {
+            ast::Expr::Tuple(items) => {
                 let mut values = Vec::new();
                 let mut types = Vec::new();
 
                 for value in *items {
-                    let expr = self.deduce_expr_ty(value);
+                    let expr = self.deduce_expr_ty(&value);
                     types.push(self.type_by_expr.of(expr));
                     values.push(expr);
                 }
@@ -444,7 +447,7 @@ where
                     self.arena.alloc(Type::Tuple(types)),
                 )
             }
-            ast::Expression::Index(array_expr, index_expr) => {
+            ast::Expr::Index(array_expr, index_expr) => {
                 let array = self.deduce_expr_ty(array_expr);
                 let index = self.deduce_expr_ty(index_expr);
 
@@ -458,13 +461,13 @@ where
 
                 (Expression::Index(array, index), ty)
             }
-            ast::Expression::Var(_) => unreachable!(),
-            ast::Expression::Cast(expr, ty) => {
+            ast::Expr::Var(_) => unreachable!(),
+            ast::Expr::Cast(expr, ty) => {
                 let expr = self.deduce_expr_ty(expr);
                 let target_ty = self.unify(ty);
                 (Expression::Cast(expr), target_ty)
             }
-            ast::Expression::StructLiteral(expr, fields) => {
+            ast::Expr::StructLiteral(expr, fields) => {
                 let ty = match expr {
                     Some(name) => self.defined_types[name.as_str()],
                     None => &Type::Unknown,
@@ -538,8 +541,8 @@ where
                     if is_compatible_to(self.type_by_expr.of(lhs), self.type_by_expr.of(rhs))
                         || self.type_by_expr.try_coerce_any(lhs, rhs)
                     {
-                        match lhs_expr {
-                            ast::Expression::Identifier(name) => {
+                        match self.ast_expr_arena.resolve(*lhs_expr) {
+                            ast::Expr::Identifier(name) => {
                                 self.locals.insert(name, self.type_by_expr.of(rhs));
                             }
                             _ => (),
