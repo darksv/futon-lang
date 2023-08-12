@@ -255,7 +255,9 @@ where
                         | ast::Operator::Greater
                         | ast::Operator::GreaterEqual
                         | ast::Operator::Equal
-                        | ast::Operator::NotEqual => self.arena.alloc(Type::Bool),
+                        | ast::Operator::NotEqual
+                        | ast::Operator::And
+                        | ast::Operator::Or => self.arena.alloc(Type::Bool),
                         ast::Operator::Add
                         | ast::Operator::Sub
                         | ast::Operator::Mul

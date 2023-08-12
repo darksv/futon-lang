@@ -1,0 +1,12 @@
+fn check_precedence(a: bool, b: bool, c: bool) -> bool {
+    return a or b and c;
+}
+
+assert check_precedence(false, false, false) == false;
+assert check_precedence(false, false, true) == false;
+assert check_precedence(false, true, false) == false;
+assert check_precedence(false, true, true) == true;
+assert check_precedence(true, false, false) == true;
+assert check_precedence(true, false, true) == true;
+assert check_precedence(true, true, false) == true;
+assert check_precedence(true, true, true) == true;

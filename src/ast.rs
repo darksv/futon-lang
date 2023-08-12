@@ -37,6 +37,8 @@ pub(crate) enum Operator {
     LessEqual,
     Greater,
     GreaterEqual,
+    And,
+    Or,
     Negate,
     Ref,
     Deref,

@@ -45,7 +45,9 @@ keywords! {
     "in" => In,
     "to" => To,
     "assert" => Assert,
-    "as" => As
+    "as" => As,
+    "and" => And,
+    "or" => Or
 }
 
 /// Kind of punctuation mark

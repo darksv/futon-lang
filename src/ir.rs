@@ -247,6 +247,8 @@ impl fmt::Debug for Instr {
                     ast::Operator::LessEqual => "<=",
                     ast::Operator::Greater => ">",
                     ast::Operator::GreaterEqual => ">=",
+                    ast::Operator::And => "and",
+                    ast::Operator::Or => "or",
                     _ => unimplemented!(),
                 },
                 b
@@ -1061,6 +1063,12 @@ pub(crate) fn execute_ir(
                     Instr::BinaryOperation(dst, op, a, b) => {
                         fn arithmetic_operation(op: ast::Operator, a: Const, b: Const) -> Option<Const> {
                             Some(match (op, a, b) {
+                                (ast::Operator::And, Const::Bool(a), Const::Bool(b)) => {
+                                    Const::Bool(a && b)
+                                }
+                                (ast::Operator::Or, Const::Bool(a), Const::Bool(b)) => {
+                                    Const::Bool(a || b)
+                                }
                                 (ast::Operator::Add, Const::Integer(a), Const::Integer(b)) => {
                                     Const::Integer(a.add(&b))
                                 }

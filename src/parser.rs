@@ -211,7 +211,7 @@ impl<'lex, 'arena> Parser<'lex, 'arena> where 'lex: 'arena {
             }
 
             let next = match token.get_type() {
-                TokenType::Punct('+' | '-' | '*' | '/') => {
+                TokenType::Punct('+' | '-' | '*' | '/') | TokenType::Keyword(Keyword::And | Keyword::Or) => {
                     if self.peek(1).get_type() == TokenType::Punct('=') {
                         break;
                     }
@@ -221,6 +221,8 @@ impl<'lex, 'arena> Parser<'lex, 'arena> where 'lex: 'arena {
                         TokenType::Punct('-') => ast::Operator::Sub,
                         TokenType::Punct('*') => ast::Operator::Mul,
                         TokenType::Punct('/') => ast::Operator::Div,
+                        TokenType::Keyword(Keyword::And) => ast::Operator::And,
+                        TokenType::Keyword(Keyword::Or) => ast::Operator::Or,
                         _ => unreachable!(),
                     };
 
@@ -332,6 +334,8 @@ impl<'lex, 'arena> Parser<'lex, 'arena> where 'lex: 'arena {
             TokenType::Punct('/') => 3,
             TokenType::Punct('.') => 4,
             TokenType::Punct('(') => 5,
+            TokenType::Keyword(Keyword::Or) => 6,
+            TokenType::Keyword(Keyword::And) => 7,
             _ => 0,
         }
     }
