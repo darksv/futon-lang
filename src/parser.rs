@@ -180,7 +180,7 @@ impl<'lex, 'arena> Parser<'lex, 'arena> where 'lex: 'arena {
                 self.expect_one(')')?;
                 match values.len() {
                     1 => values.into_iter().next().unwrap(),
-                    _ => ast::Expr::Tuple(self.arena.alloc_many(values.into_iter())),
+                    _ => ast::Expr::Tuple(self.arena.alloc_many(values)),
                 }
             }
             TokenType::Punct('[') => {
@@ -193,7 +193,7 @@ impl<'lex, 'arena> Parser<'lex, 'arena> where 'lex: 'arena {
                     values.push(self.parse_expr(0)?);
                     self.match_one(',');
                 }
-                ast::Expr::Array(self.arena.alloc_many(values.into_iter()))
+                ast::Expr::Array(self.arena.alloc_many(values))
             }
             _other => {
                 return Ok(None);
@@ -276,7 +276,7 @@ impl<'lex, 'arena> Parser<'lex, 'arena> where 'lex: 'arena {
                     self.advance();
                     let args = self.parse_comma_separated_exprs()?;
                     self.expect_one(')')?;
-                    ast::Expr::Call(self.arena.alloc(expr), self.arena.alloc_many(args.into_iter()))
+                    ast::Expr::Call(self.arena.alloc(expr), self.arena.alloc_many(args))
                 }
                 TokenType::Punct('{') if let Some(('.' | '}', _)) = self.peek(1).as_punct() => {
                     self.advance();

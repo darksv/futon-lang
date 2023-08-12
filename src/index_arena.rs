@@ -32,10 +32,15 @@ impl<T> IndexArena<T> {
         Handle(idx, PhantomData, Single)
     }
 
-    pub(crate) fn alloc_many(&mut self, values: impl ExactSizeIterator<Item=T>) -> Handle<T, Many> {
+    pub(crate) fn alloc_many<I>(&mut self, values: I) -> Handle<T, Many>
+        where
+            I: IntoIterator<Item=T>,
+            I::IntoIter: ExactSizeIterator<Item=T>
+    {
+        let iter = values.into_iter();
         let idx = self.values.len().try_into().expect("too many items??");
-        let count = values.len().try_into().expect("wtf");
-        self.values.extend(values);
+        let count = iter.len().try_into().expect("wtf");
+        self.values.extend(iter);
         Handle(idx, PhantomData, Many(count))
     }
 
@@ -117,7 +122,7 @@ mod tests {
         let mut arena = IndexArena::new();
         let a = arena.alloc(12);
         let b = arena.alloc(32);
-        let c = arena.alloc_many([21, 37].into_iter());
+        let c = arena.alloc_many([21, 37]);
         let mut it = c.into_iter();
         let c1 = it.next().unwrap();
         let c2 = it.next().unwrap();
