@@ -338,10 +338,10 @@ pub(crate) fn validate_types(ir: &FunctionIr<'_>) {
 pub(crate) fn dump_ir(ir: &FunctionIr<'_>, f: &mut impl Write) -> io::Result<()> {
     write!(f, "fn {}(", ir.name)?;
     for (idx, it) in ir.defines.iter().enumerate().take(ir.num_args) {
-        write!(f, "_{}: {:?}", idx, it.ty)?;
         if idx != 0 {
             write!(f, ", ")?;
         }
+        write!(f, "_{}: {:?}", idx, it.ty)?;
     }
     writeln!(f, ") -> {:?} {{", ir.defines[ir.num_args].ty)?;
 
